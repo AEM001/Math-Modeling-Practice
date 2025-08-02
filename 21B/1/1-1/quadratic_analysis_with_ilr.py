@@ -82,11 +82,13 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
             'extremum_temp': np.nan,
             'extremum_value': np.nan,
             'monotonicity': 'unknown',
-            'fitted_values': np.full_like(T, np.nan)
+            'fitted_values': np.full_like(T, np.nan),
+            'center_point': np.nan
         }
     
-    # 温度中心化处理：T' = T - 300
-    T_centered = T - 300
+    # 动态计算温度中心化点：使用温度数据的均值
+    T_center = np.mean(T)
+    T_centered = T - T_center
     
     # 构建设计矩阵 [1, T', T'^2]
     X = np.column_stack([np.ones(len(T_centered)), T_centered, T_centered**2])
@@ -144,7 +146,7 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
     
     if has_quadratic_term and abs(coefficients[2]) > 1e-10:
         T_extremum_centered = -coefficients[1] / (2 * coefficients[2])
-        extremum_temp = T_extremum_centered + 300
+        extremum_temp = T_extremum_centered + T_center
         extremum_value = (coefficients[0] + coefficients[1] * T_extremum_centered + 
                          coefficients[2] * T_extremum_centered**2)
         
@@ -180,7 +182,8 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
         'extremum_temp': extremum_temp,
         'extremum_value': extremum_value,
         'monotonicity': monotonicity,
-        'fitted_values': fitted_values
+        'fitted_values': fitted_values,
+        'center_point': T_center
     }
 
 def analyze_catalyst_performance():
@@ -207,7 +210,7 @@ def analyze_catalyst_performance():
     
     # 加载数据
     try:
-        df = pd.read_csv('../附件1.csv')
+        df = pd.read_csv('/Users/Mac/Downloads/Math-Modeling-Practice/21B/附件1.csv')
     except FileNotFoundError:
         try:
             df = pd.read_csv('附件1.csv')
@@ -263,7 +266,7 @@ def analyze_catalyst_performance():
         
         if not np.isnan(eth_analysis['r_squared']):
             T_smooth = np.linspace(group['温度'].min(), group['温度'].max(), 100)
-            T_smooth_centered = T_smooth - 300
+            T_smooth_centered = T_smooth - eth_analysis['center_point']
             fitted_smooth = (eth_analysis['coefficients'][0] + 
                            eth_analysis['coefficients'][1] * T_smooth_centered + 
                            eth_analysis['coefficients'][2] * T_smooth_centered**2)
@@ -284,9 +287,10 @@ def analyze_catalyst_performance():
         c4_analysis = quadratic_regression_analysis(group['温度'].values, group['C4烯烃选择性(%)'].values)
         
         if not np.isnan(c4_analysis['r_squared']):
+            T_smooth_centered_c4 = T_smooth - c4_analysis['center_point']
             fitted_smooth_c4 = (c4_analysis['coefficients'][0] + 
-                               c4_analysis['coefficients'][1] * T_smooth_centered + 
-                               c4_analysis['coefficients'][2] * T_smooth_centered**2)
+                               c4_analysis['coefficients'][1] * T_smooth_centered_c4 + 
+                               c4_analysis['coefficients'][2] * T_smooth_centered_c4**2)
             ax2.plot(T_smooth, fitted_smooth_c4, ':', color=color2, alpha=0.7, label='二次拟合')
         
         # 对ILR变换后的第一个分量进行分析（对应C4烯烃相关的变换）
@@ -300,6 +304,8 @@ def analyze_catalyst_performance():
         # 收集分析结果
         analysis_results.append({
             '催化剂组合编号': name,
+            '温度范围': f"{group['温度'].min():.1f}-{group['温度'].max():.1f}°C",
+            '温度中心点': f"{eth_analysis['center_point']:.1f}°C",
             '乙醇转化率-β0': eth_analysis['coefficients'][0],
             '乙醇转化率-β1': eth_analysis['coefficients'][1], 
             '乙醇转化率-β2': eth_analysis['coefficients'][2],
@@ -374,6 +380,20 @@ def analyze_catalyst_performance():
     
     print("原始数据二次回归结果已保存为 'quadratic_regression_results.csv'")
     print("ILR变换分析结果已保存为 'ilr_analysis_results.csv'")
+    
+    # 显示中心化处理信息
+    print("\n=== 中心化处理信息 ===")
+    for result in analysis_results:
+        print(f"催化剂 {result['催化剂组合编号']}:")
+        print(f"  温度范围: {result['温度范围']}")
+        print(f"  中心化点: {result['温度中心点']}")
+        print(f"  乙醇转化率单调性: {result['乙醇转化率-单调性']}")
+        print(f"  C4烯烃选择性单调性: {result['C4烯烃选择性-单调性']}")
+        if not np.isnan(result['乙醇转化率-极值温度']):
+            print(f"  乙醇转化率极值温度: {result['乙醇转化率-极值温度']:.1f}°C")
+        if not np.isnan(result['C4烯烃选择性-极值温度']):
+            print(f"  C4烯烃选择性极值温度: {result['C4烯烃选择性-极值温度']:.1f}°C")
+        print()
 
 if __name__ == '__main__':
     analyze_catalyst_performance()
