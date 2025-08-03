@@ -2,7 +2,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.font_manager as fm
-from scipy.stats import f, stats
+from scipy import stats
+from scipy.stats import f, t
 from sklearn.linear_model import Ridge
 import warnings
 warnings.filterwarnings('ignore')
@@ -70,21 +71,51 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
     二次回归分析，包括正则化和统计检验
     """
     if len(T) < 3:
-        return {
-            'coefficients': [np.nan, np.nan, np.nan],
-            'r_squared': np.nan,
-            'f_statistic': np.nan,
-            'f_p_value': np.nan,
-            'quadratic_t_stat': np.nan,
-            'quadratic_p_value': np.nan,
-            'is_significant': False,
-            'has_quadratic_term': False,
-            'extremum_temp': np.nan,
-            'extremum_value': np.nan,
-            'monotonicity': 'unknown',
-            'fitted_values': np.full_like(T, np.nan),
-            'center_point': np.nan
-        }
+        # 当样本数不足时，进行简单线性回归
+        if len(T) == 2:
+            T_center = np.mean(T)
+            T_centered = T - T_center
+            # 简单线性回归
+            slope = np.sum((T_centered) * (y - np.mean(y))) / np.sum(T_centered**2) if np.sum(T_centered**2) > 0 else 0
+            intercept = np.mean(y)
+            fitted_values = intercept + slope * T_centered
+            ss_res = np.sum((y - fitted_values) ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+            monotonicity = '递增' if slope > 0 else ('递减' if slope < 0 else '常数')
+            
+            return {
+                'coefficients': [intercept, slope, 0.0],
+                'r_squared': r_squared,
+                'f_statistic': 0.0,
+                'f_p_value': 1.0,
+                'quadratic_t_stat': 0.0,
+                'quadratic_p_value': 1.0,
+                'is_significant': False,
+                'has_quadratic_term': False,
+                'extremum_temp': 0.0,
+                'extremum_value': 0.0,
+                'monotonicity': monotonicity,
+                'fitted_values': fitted_values,
+                'center_point': T_center
+            }
+        else:
+            # 只有一个数据点
+            return {
+                'coefficients': [np.mean(y), 0.0, 0.0],
+                'r_squared': 0.0,
+                'f_statistic': 0.0,
+                'f_p_value': 1.0,
+                'quadratic_t_stat': 0.0,
+                'quadratic_p_value': 1.0,
+                'is_significant': False,
+                'has_quadratic_term': False,
+                'extremum_temp': 0.0,
+                'extremum_value': 0.0,
+                'monotonicity': '常数',
+                'fitted_values': np.full_like(T, np.mean(y)),
+                'center_point': np.mean(T)
+            }
     
     # 动态计算温度中心化点：使用温度数据的均值
     T_center = np.mean(T)
@@ -116,8 +147,8 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
         f_p_value = 1 - f.cdf(f_statistic, p - 1, n - p) if mse > 0 else 1
         is_significant = f_statistic > 19.0  # F_{0.05(2,2)} = 19.0
     else:
-        f_statistic = np.nan
-        f_p_value = np.nan
+        f_statistic = 0.0
+        f_p_value = 1.0
         is_significant = False
     
     # 二次项显著性t检验
@@ -127,16 +158,22 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
             var_beta = mse * XtX_inv
             se_beta2 = np.sqrt(var_beta[2, 2]) if var_beta[2, 2] > 0 else np.inf
             
-            quadratic_t_stat = coefficients[2] / se_beta2 if se_beta2 > 0 else 0
-            quadratic_p_value = 2 * (1 - stats.t.cdf(abs(quadratic_t_stat), n - p))
-            has_quadratic_term = quadratic_p_value < 0.2  # 放宽标准
-        except:
-            quadratic_t_stat = np.nan
-            quadratic_p_value = np.nan
+            if se_beta2 > 0 and se_beta2 != np.inf:
+                quadratic_t_stat = coefficients[2] / se_beta2
+                quadratic_p_value = 2 * (1 - t.cdf(abs(quadratic_t_stat), n - p))
+                has_quadratic_term = quadratic_p_value < 0.2  # 放宽标准
+            else:
+                quadratic_t_stat = 0.0
+                quadratic_p_value = 1.0
+                has_quadratic_term = False
+        except Exception as e:
+            print(f"警告：二次项t检验计算失败: {e}")
+            quadratic_t_stat = 0.0
+            quadratic_p_value = 1.0
             has_quadratic_term = False
     else:
-        quadratic_t_stat = np.nan
-        quadratic_p_value = np.nan
+        quadratic_t_stat = 0.0
+        quadratic_p_value = 1.0
         has_quadratic_term = False
     
     # 分析极值点和单调性
@@ -275,7 +312,22 @@ def analyze_catalyst_performance():
         
         # 2. C4烯烃选择性ILR变换分析
         selectivity_data = group[selectivity_columns].values
-        ilr_data = ilr_transform(selectivity_data)
+        try:
+            # 检查数据有效性
+            if np.any(selectivity_data <= 0):
+                print(f"警告：催化剂 {name} 的选择性数据包含零值或负值，将进行处理")
+                selectivity_data = np.maximum(selectivity_data, 1e-10)
+            
+            ilr_data = ilr_transform(selectivity_data)
+            
+            # 检查ILR变换结果
+            if np.any(np.isnan(ilr_data)) or np.any(np.isinf(ilr_data)):
+                print(f"警告：催化剂 {name} 的ILR变换产生了无效值")
+                ilr_data = np.nan_to_num(ilr_data, nan=0.0, posinf=1.0, neginf=-1.0)
+                
+        except Exception as e:
+            print(f"错误：催化剂 {name} 的ILR变换失败: {e}")
+            ilr_data = np.zeros((len(selectivity_data), len(selectivity_columns)-1))
         
         # 创建右轴显示ILR变换后的C4烯烃相关分量
         ax2 = ax1.twinx()
@@ -332,12 +384,9 @@ def analyze_catalyst_performance():
             'ILR-C4烯烃-极值温度': ilr_c4_analysis['extremum_temp'],
             'ILR-C4烯烃-极值': ilr_c4_analysis['extremum_value'],
             'ILR-C4烯烃-单调性': ilr_c4_analysis['monotonicity'],
-            # 添加ILR分量的原始数值
-            'ILR-C4分量_250C': ilr_data[0, 1] if len(ilr_data) > 0 else np.nan,
-            'ILR-C4分量_275C': ilr_data[1, 1] if len(ilr_data) > 1 else np.nan,
-            'ILR-C4分量_300C': ilr_data[2, 1] if len(ilr_data) > 2 else np.nan,
-            'ILR-C4分量_325C': ilr_data[3, 1] if len(ilr_data) > 3 else np.nan,
-            'ILR-C4分量_350C': ilr_data[4, 1] if len(ilr_data) > 4 else np.nan,
+            # 添加ILR分量的原始数值（动态获取温度点）
+            **{f'ILR-C4分量_{temp:.0f}C': ilr_data[idx, 1] if idx < len(ilr_data) else np.nan 
+               for idx, temp in enumerate(sorted(group['温度'].values))},
         })
     
     # 隐藏多余的空子图
