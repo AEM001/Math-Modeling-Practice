@@ -188,7 +188,9 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
 
 def analyze_catalyst_performance():
     """
-    催化剂性能二次拟合分析（含ILR变换）
+    催化剂性能二次拟合分析
+    - 乙醇转化率：直接分析（无约束数据）
+    - C4烯烃选择性：ILR变换分析（成分数据，存在定和约束）
     """
     # 设置中文字体
     chinese_fonts = ['PingFang HK', 'Heiti TC', 'STHeiti', 'Arial Unicode MS', 'SimHei', 'WenQuanYi Zen Hei']
@@ -235,7 +237,7 @@ def analyze_catalyst_performance():
     
     # 创建图表
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(25, n_rows * 4), constrained_layout=True)
-    fig.suptitle('催化剂二次拟合分析（含ILR变换处理）', fontsize=20, y=1.02)
+    fig.suptitle('催化剂性能分析：乙醇转化率(直接分析) vs C4烯烃选择性(ILR变换)', fontsize=18, y=1.02)
     
     if n_rows == 1 and n_cols > 1:
         axes = axes.reshape(1, -1)
@@ -247,12 +249,11 @@ def analyze_catalyst_performance():
     axes_flat = axes.flatten()
     
     analysis_results = []
-    ilr_results = []
     
     for i, (name, group) in enumerate(grouped):
         ax1 = axes_flat[i]
         
-        # 原始数据分析 - 乙醇转化率
+        # 1. 乙醇转化率分析（直接分析，无约束）
         color1 = 'tab:blue'
         ax1.set_xlabel('温度 (°C)', fontsize=10)
         ax1.set_ylabel('乙醇转化率 (%)', color=color1, fontsize=10)
@@ -261,7 +262,7 @@ def analyze_catalyst_performance():
         ax1.set_title(f'催化剂: {name}', fontsize=12)
         ax1.grid(True, linestyle='--', alpha=0.6)
         
-        # 二次回归分析 - 乙醇转化率
+        # 乙醇转化率二次回归分析
         eth_analysis = quadratic_regression_analysis(group['温度'].values, group['乙醇转化率(%)'].values)
         
         if not np.isnan(eth_analysis['r_squared']):
@@ -270,31 +271,28 @@ def analyze_catalyst_performance():
             fitted_smooth = (eth_analysis['coefficients'][0] + 
                            eth_analysis['coefficients'][1] * T_smooth_centered + 
                            eth_analysis['coefficients'][2] * T_smooth_centered**2)
-            ax1.plot(T_smooth, fitted_smooth, '--', color=color1, alpha=0.7, label='二次拟合')
+            ax1.plot(T_smooth, fitted_smooth, '--', color=color1, alpha=0.7, label='乙醇转化率拟合')
         
-        # ILR变换处理选择性数据
+        # 2. C4烯烃选择性ILR变换分析
         selectivity_data = group[selectivity_columns].values
         ilr_data = ilr_transform(selectivity_data)
         
-        # 对C4烯烃选择性（第二列，索引1）进行分析
+        # 创建右轴显示ILR变换后的C4烯烃相关分量
         ax2 = ax1.twinx()
         color2 = 'tab:red'
-        ax2.set_ylabel('C4烯烃选择性 (%)', color=color2, fontsize=10)
-        ax2.plot(group['温度'], group['C4烯烃选择性(%)'], 's--', color=color2, label='C4烯烃选择性', markersize=4)
+        ax2.set_ylabel('ILR-C4烯烃分量', color=color2, fontsize=10)
+        ax2.plot(group['温度'], ilr_data[:, 1], 's--', color=color2, label='ILR-C4烯烃分量', markersize=4)
         ax2.tick_params(axis='y', labelcolor=color2)
         
-        # 二次回归分析 - C4烯烃选择性（原始数据）
-        c4_analysis = quadratic_regression_analysis(group['温度'].values, group['C4烯烃选择性(%)'].values)
+        # 对ILR变换后的C4烯烃分量进行二次回归分析
+        ilr_c4_analysis = quadratic_regression_analysis(group['温度'].values, ilr_data[:, 1])
         
-        if not np.isnan(c4_analysis['r_squared']):
-            T_smooth_centered_c4 = T_smooth - c4_analysis['center_point']
-            fitted_smooth_c4 = (c4_analysis['coefficients'][0] + 
-                               c4_analysis['coefficients'][1] * T_smooth_centered_c4 + 
-                               c4_analysis['coefficients'][2] * T_smooth_centered_c4**2)
-            ax2.plot(T_smooth, fitted_smooth_c4, ':', color=color2, alpha=0.7, label='二次拟合')
-        
-        # 对ILR变换后的第一个分量进行分析（对应C4烯烃相关的变换）
-        ilr_c4_analysis = quadratic_regression_analysis(group['温度'].values, ilr_data[:, 1])  # 第二个ILR分量
+        if not np.isnan(ilr_c4_analysis['r_squared']):
+            T_smooth_centered_ilr = T_smooth - ilr_c4_analysis['center_point']
+            fitted_smooth_ilr = (ilr_c4_analysis['coefficients'][0] + 
+                                ilr_c4_analysis['coefficients'][1] * T_smooth_centered_ilr + 
+                                ilr_c4_analysis['coefficients'][2] * T_smooth_centered_ilr**2)
+            ax2.plot(T_smooth, fitted_smooth_ilr, ':', color=color2, alpha=0.7, label='ILR-C4拟合')
         
         # 图例
         lines1, labels1 = ax1.get_legend_handles_labels()
@@ -306,6 +304,7 @@ def analyze_catalyst_performance():
             '催化剂组合编号': name,
             '温度范围': f"{group['温度'].min():.1f}-{group['温度'].max():.1f}°C",
             '温度中心点': f"{eth_analysis['center_point']:.1f}°C",
+            # 乙醇转化率分析（直接分析）
             '乙醇转化率-β0': eth_analysis['coefficients'][0],
             '乙醇转化率-β1': eth_analysis['coefficients'][1], 
             '乙醇转化率-β2': eth_analysis['coefficients'][2],
@@ -319,24 +318,7 @@ def analyze_catalyst_performance():
             '乙醇转化率-极值温度': eth_analysis['extremum_temp'],
             '乙醇转化率-极值': eth_analysis['extremum_value'],
             '乙醇转化率-单调性': eth_analysis['monotonicity'],
-            'C4烯烃选择性-β0': c4_analysis['coefficients'][0],
-            'C4烯烃选择性-β1': c4_analysis['coefficients'][1],
-            'C4烯烃选择性-β2': c4_analysis['coefficients'][2],
-            'C4烯烃选择性-R方': c4_analysis['r_squared'],
-            'C4烯烃选择性-F统计量': c4_analysis['f_statistic'],
-            'C4烯烃选择性-F检验p值': c4_analysis['f_p_value'],
-            'C4烯烃选择性-模型显著': c4_analysis['is_significant'],
-            'C4烯烃选择性-二次项t统计量': c4_analysis['quadratic_t_stat'],
-            'C4烯烃选择性-二次项p值': c4_analysis['quadratic_p_value'],
-            'C4烯烃选择性-保留二次项': c4_analysis['has_quadratic_term'],
-            'C4烯烃选择性-极值温度': c4_analysis['extremum_temp'],
-            'C4烯烃选择性-极值': c4_analysis['extremum_value'],
-            'C4烯烃选择性-单调性': c4_analysis['monotonicity']
-        })
-        
-        # 收集ILR分析结果
-        ilr_result = {
-            '催化剂组合编号': name,
+            # ILR-C4烯烃分量分析（处理定和约束）
             'ILR-C4烯烃-β0': ilr_c4_analysis['coefficients'][0],
             'ILR-C4烯烃-β1': ilr_c4_analysis['coefficients'][1],
             'ILR-C4烯烃-β2': ilr_c4_analysis['coefficients'][2],
@@ -349,50 +331,47 @@ def analyze_catalyst_performance():
             'ILR-C4烯烃-保留二次项': ilr_c4_analysis['has_quadratic_term'],
             'ILR-C4烯烃-极值温度': ilr_c4_analysis['extremum_temp'],
             'ILR-C4烯烃-极值': ilr_c4_analysis['extremum_value'],
-            'ILR-C4烯烃-单调性': ilr_c4_analysis['monotonicity']
-        }
-        
-        # 添加所有ILR分量的数据
-        for j in range(ilr_data.shape[1]):
-            ilr_result[f'ILR分量{j+1}_温度250'] = ilr_data[0, j] if len(ilr_data) > 0 else np.nan
-            ilr_result[f'ILR分量{j+1}_温度275'] = ilr_data[1, j] if len(ilr_data) > 1 else np.nan
-            ilr_result[f'ILR分量{j+1}_温度300'] = ilr_data[2, j] if len(ilr_data) > 2 else np.nan
-            ilr_result[f'ILR分量{j+1}_温度325'] = ilr_data[3, j] if len(ilr_data) > 3 else np.nan
-            ilr_result[f'ILR分量{j+1}_温度350'] = ilr_data[4, j] if len(ilr_data) > 4 else np.nan
-        
-        ilr_results.append(ilr_result)
+            'ILR-C4烯烃-单调性': ilr_c4_analysis['monotonicity'],
+            # 添加ILR分量的原始数值
+            'ILR-C4分量_250C': ilr_data[0, 1] if len(ilr_data) > 0 else np.nan,
+            'ILR-C4分量_275C': ilr_data[1, 1] if len(ilr_data) > 1 else np.nan,
+            'ILR-C4分量_300C': ilr_data[2, 1] if len(ilr_data) > 2 else np.nan,
+            'ILR-C4分量_325C': ilr_data[3, 1] if len(ilr_data) > 3 else np.nan,
+            'ILR-C4分量_350C': ilr_data[4, 1] if len(ilr_data) > 4 else np.nan,
+        })
     
     # 隐藏多余的空子图
     for j in range(i + 1, len(axes_flat)):
         axes_flat[j].set_visible(False)
     
     # 保存结果
-    plt.savefig('quadratic_analysis_with_ilr.png', dpi=300, bbox_inches='tight')
-    print("图表已保存为 'quadratic_analysis_with_ilr.png'")
+    plt.savefig('catalyst_analysis_optimized.png', dpi=300, bbox_inches='tight')
+    print("图表已保存为 'catalyst_analysis_optimized.png'")
     plt.show()
     
     # 保存分析结果
     results_df = pd.DataFrame(analysis_results)
-    results_df.to_csv('quadratic_regression_results.csv', index=False, encoding='utf-8')
+    results_df.to_csv('catalyst_analysis_optimized_results.csv', index=False, encoding='utf-8')
     
-    ilr_df = pd.DataFrame(ilr_results)
-    ilr_df.to_csv('ilr_analysis_results.csv', index=False, encoding='utf-8')
+    print("优化后的催化剂分析结果已保存为 'catalyst_analysis_optimized_results.csv'")
     
-    print("原始数据二次回归结果已保存为 'quadratic_regression_results.csv'")
-    print("ILR变换分析结果已保存为 'ilr_analysis_results.csv'")
+    # 显示分析总结
+    print("\n=== 分析方法总结 ===")
+    print("1. 乙醇转化率：直接二次回归分析（无约束数据）")
+    print("2. C4烯烃选择性：ILR变换后二次回归分析（处理定和约束）")
+    print("3. ILR变换：消除成分数据间的相关性和定和约束影响")
     
-    # 显示中心化处理信息
-    print("\n=== 中心化处理信息 ===")
+    print("\n=== 各催化剂分析结果 ===")
     for result in analysis_results:
         print(f"催化剂 {result['催化剂组合编号']}:")
         print(f"  温度范围: {result['温度范围']}")
         print(f"  中心化点: {result['温度中心点']}")
         print(f"  乙醇转化率单调性: {result['乙醇转化率-单调性']}")
-        print(f"  C4烯烃选择性单调性: {result['C4烯烃选择性-单调性']}")
+        print(f"  ILR-C4烯烃单调性: {result['ILR-C4烯烃-单调性']}")
         if not np.isnan(result['乙醇转化率-极值温度']):
             print(f"  乙醇转化率极值温度: {result['乙醇转化率-极值温度']:.1f}°C")
-        if not np.isnan(result['C4烯烃选择性-极值温度']):
-            print(f"  C4烯烃选择性极值温度: {result['C4烯烃选择性-极值温度']:.1f}°C")
+        if not np.isnan(result['ILR-C4烯烃-极值温度']):
+            print(f"  ILR-C4烯烃极值温度: {result['ILR-C4烯烃-极值温度']:.1f}°C")
         print()
 
 if __name__ == '__main__':
