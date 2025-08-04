@@ -5,6 +5,7 @@ import matplotlib.font_manager as fm
 from scipy import stats
 from scipy.stats import f, t
 from sklearn.linear_model import Ridge
+from sklearn.model_selection import LeaveOneOut
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -66,10 +67,75 @@ def inverse_ilr_transform(ilr_data):
     
     return compositions
 
-def quadratic_regression_analysis(T, y, alpha=0.1):
+def optimize_alpha_loocv(T, y):
+    """
+    使用留一交叉验证优化正则化参数alpha
+    适用于小样本数据（3-5个数据点）
+    
+    Parameters:
+    T: array-like, 温度数据
+    y: array-like, 响应变量数据
+    
+    Returns:
+    float: 最优的alpha值
+    """
+    if len(T) < 3:
+        return 0.1  # 样本太少，使用默认值
+    
+    # 测试alpha范围：从0.001到100的对数空间
+    alphas = np.logspace(-3, 2, 20)
+    best_alpha = 0.1
+    best_mse = float('inf')
+    
+    # 温度中心化
+    T_center = np.mean(T)
+    T_centered = T - T_center
+    X = np.column_stack([np.ones(len(T_centered)), T_centered, T_centered**2])
+    
+    loo = LeaveOneOut()
+    
+    for alpha in alphas:
+        mse_scores = []
+        
+        try:
+            for train_idx, test_idx in loo.split(X):
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
+                
+                ridge = Ridge(alpha=alpha, fit_intercept=False)
+                ridge.fit(X_train, y_train)
+                y_pred = ridge.predict(X_test)
+                
+                mse = (y_pred[0] - y_test[0])**2
+                mse_scores.append(mse)
+            
+            avg_mse = np.mean(mse_scores)
+            if avg_mse < best_mse:
+                best_mse = avg_mse
+                best_alpha = alpha
+                
+        except Exception as e:
+            # 如果某个alpha值导致数值问题，跳过
+            continue
+    
+    return best_alpha
+
+def quadratic_regression_analysis(T, y, alpha=None):
     """
     二次回归分析，包括正则化和统计检验
+    
+    Parameters:
+    T: array-like, 温度数据
+    y: array-like, 响应变量数据
+    alpha: float or None, 正则化参数。如果为None，则自动优化
+    
+    Returns:
+    dict: 包含回归分析结果的字典
     """
+    # 如果alpha未指定，则使用LOOCV自动优化
+    if alpha is None:
+        alpha = optimize_alpha_loocv(T, y)
+    
     if len(T) < 3:
         # 当样本数不足时，进行简单线性回归
         if len(T) == 2:
@@ -97,7 +163,8 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
                 'extremum_value': 0.0,
                 'monotonicity': monotonicity,
                 'fitted_values': fitted_values,
-                'center_point': T_center
+                'center_point': T_center,
+                'optimal_alpha': alpha
             }
         else:
             # 只有一个数据点
@@ -114,7 +181,8 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
                 'extremum_value': 0.0,
                 'monotonicity': '常数',
                 'fitted_values': np.full_like(T, np.mean(y)),
-                'center_point': np.mean(T)
+                'center_point': np.mean(T),
+                'optimal_alpha': alpha
             }
     
     # 动态计算温度中心化点：使用温度数据的均值
@@ -220,7 +288,8 @@ def quadratic_regression_analysis(T, y, alpha=0.1):
         'extremum_value': extremum_value,
         'monotonicity': monotonicity,
         'fitted_values': fitted_values,
-        'center_point': T_center
+        'center_point': T_center,
+        'optimal_alpha': alpha
     }
 
 def analyze_catalyst_performance():
@@ -370,6 +439,7 @@ def analyze_catalyst_performance():
             '乙醇转化率-极值温度': eth_analysis['extremum_temp'],
             '乙醇转化率-极值': eth_analysis['extremum_value'],
             '乙醇转化率-单调性': eth_analysis['monotonicity'],
+            '乙醇转化率-最优alpha': eth_analysis['optimal_alpha'],
             # ILR-C4烯烃分量分析（处理定和约束）
             'ILR-C4烯烃-β0': ilr_c4_analysis['coefficients'][0],
             'ILR-C4烯烃-β1': ilr_c4_analysis['coefficients'][1],
@@ -384,6 +454,7 @@ def analyze_catalyst_performance():
             'ILR-C4烯烃-极值温度': ilr_c4_analysis['extremum_temp'],
             'ILR-C4烯烃-极值': ilr_c4_analysis['extremum_value'],
             'ILR-C4烯烃-单调性': ilr_c4_analysis['monotonicity'],
+            'ILR-C4烯烃-最优alpha': ilr_c4_analysis['optimal_alpha'],
             # 添加ILR分量的原始数值（动态获取温度点）
             **{f'ILR-C4分量_{temp:.0f}C': ilr_data[idx, 1] if idx < len(ilr_data) else np.nan 
                for idx, temp in enumerate(sorted(group['温度'].values))},
@@ -409,14 +480,16 @@ def analyze_catalyst_performance():
     print("1. 乙醇转化率：直接二次回归分析（无约束数据）")
     print("2. C4烯烃选择性：ILR变换后二次回归分析（处理定和约束）")
     print("3. ILR变换：消除成分数据间的相关性和定和约束影响")
+    print("4. 正则化优化：使用留一交叉验证(LOOCV)自动优化alpha参数")
+    print("5. 小样本适应：针对3-5个数据点的专门优化策略")
     
     print("\n=== 各催化剂分析结果 ===")
     for result in analysis_results:
         print(f"催化剂 {result['催化剂组合编号']}:")
         print(f"  温度范围: {result['温度范围']}")
         print(f"  中心化点: {result['温度中心点']}")
-        print(f"  乙醇转化率单调性: {result['乙醇转化率-单调性']}")
-        print(f"  ILR-C4烯烃单调性: {result['ILR-C4烯烃-单调性']}")
+        print(f"  乙醇转化率单调性: {result['乙醇转化率-单调性']} (α={result['乙醇转化率-最优alpha']:.4f})")
+        print(f"  ILR-C4烯烃单调性: {result['ILR-C4烯烃-单调性']} (α={result['ILR-C4烯烃-最优alpha']:.4f})")
         if not np.isnan(result['乙醇转化率-极值温度']):
             print(f"  乙醇转化率极值温度: {result['乙醇转化率-极值温度']:.1f}°C")
         if not np.isnan(result['ILR-C4烯烃-极值温度']):
