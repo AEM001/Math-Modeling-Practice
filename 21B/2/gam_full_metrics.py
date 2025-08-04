@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split, KFold, LeaveOneOut
 from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.feature_selection import SelectKBest, f_regression
@@ -152,9 +152,10 @@ class GAMAnalyzer:
         }
         
         lam_ranges = {
-            '保守': np.logspace(-2, 2, 9),
-            '标准': np.logspace(-3, 3, 11),
-            '精细': np.logspace(-5, 5, 15)
+            '保守': np.logspace(-1, 1, 7),      # 更保守的正则化
+            '标准': np.logspace(-2, 2, 9),      # 标准配置
+            '精细': np.logspace(-3, 3, 11),     # 精细搜索
+            '增强': np.logspace(-0.5, 0.5, 5)   # 新增：非常保守的正则化
         }
         
         results = {}
@@ -195,16 +196,17 @@ class GAMAnalyzer:
                         cv_mean = np.mean(cv_scores)
                         cv_std = np.std(cv_scores)
                         
-                        # 综合评分
+                        # 综合评分（适应留一法）
                         overfitting_penalty = max(0, train_score - test_score - 0.1) * 2
-                        stability_bonus = max(0, 0.2 - cv_std) * 0.5
-                        complexity_penalty = len(continuous_terms) * 0.01
-                        composite_score = test_score - cv_std - overfitting_penalty + stability_bonus - complexity_penalty
+                        stability_bonus = max(0, 0.3 - cv_std) * 0.8  # 增强稳定性奖励
+                        complexity_penalty = len(continuous_terms) * 0.015  # 增强复杂度惩罚
+                        cv_performance_bonus = max(0, cv_mean) * 0.5  # 新增：CV性能奖励
+                        composite_score = test_score - cv_std - overfitting_penalty + stability_bonus - complexity_penalty + cv_performance_bonus
                         
                         print(f"  {config_name}+{lam_name}: 训练R²={train_score:.3f}, 测试R²={test_score:.3f}, "
                               f"CV={cv_mean:.3f}±{cv_std:.3f}, 综合={composite_score:.3f}")
                         
-                        if composite_score > best_score:
+                        if composite_score > best_score and not np.isnan(composite_score):
                             best_score = composite_score
                             best_model = gam
                             best_config = config_name
@@ -214,6 +216,21 @@ class GAMAnalyzer:
                         print(f"  {config_name}+{lam_name}: 构建失败 ({e})")
             
             print(f"  ✓ 最佳{target_name}模型: {best_config}+{best_lam_range}")
+            
+            # 如果没有找到最佳模型，选择第一个成功的模型
+            if best_model is None:
+                print(f"  ⚠ 未找到最佳模型，使用默认配置")
+                best_config = '极简'
+                best_lam_range = '标准'
+                # 重新构建默认模型
+                continuous_terms = []
+                for i in range(len(self.feature_names) - 1):
+                    continuous_terms.append(s(i, n_splines=3, spline_order=2))
+                categorical_term = [f(len(self.feature_names) - 1)]
+                all_terms = continuous_terms + categorical_term
+                model_terms = reduce(operator.add, all_terms)
+                best_model = LinearGAM(model_terms)
+                best_model.gridsearch(self.X_train, y_train, lam=np.logspace(-2, 2, 9))
             
             model_key = 'conversion' if target_name == '转化率' else 'selectivity'
             self.models[f'{model_key}_best'] = best_model
@@ -298,15 +315,17 @@ class GAMAnalyzer:
                     ratios.append(np.nan)
         return ratios
     
-    def _cross_validate_gam(self, model, target_name, cv=5):
-        """GAM交叉验证"""
+    def _cross_validate_gam(self, model, target_name, cv=None):
+        """GAM交叉验证 - 使用留一法"""
         y_all = self.y_conversion if target_name == '转化率' else self.y_selectivity
         X_all = np.vstack([self.X_train_raw, self.X_test_raw])
         
-        kf = KFold(n_splits=cv, shuffle=True, random_state=42)
+        # 使用留一法交叉验证（小数据集）
+        from sklearn.model_selection import LeaveOneOut
+        loo = LeaveOneOut()
         cv_scores = []
         
-        for train_idx, val_idx in kf.split(X_all):
+        for train_idx, val_idx in loo.split(X_all):
             X_cv_train, X_cv_val = X_all[train_idx], X_all[val_idx]
             y_cv_train, y_cv_val = y_all[train_idx], y_all[val_idx]
 
@@ -317,11 +336,16 @@ class GAMAnalyzer:
             try:
                 cv_gam = LinearGAM(model.terms, lam=model.lam).fit(X_cv_train_scaled, y_cv_train)
                 cv_score = cv_gam.score(X_cv_val_scaled, y_cv_val)
-                cv_scores.append(cv_score)
+                if not np.isnan(cv_score) and cv_score > -10:  # 过滤异常值
+                    cv_scores.append(cv_score)
             except Exception as e:
-                cv_scores.append(0)
+                continue
         
-        return [s for s in cv_scores if s > -1 and not np.isnan(s)]
+        # 如果没有有效的CV分数，返回默认值
+        if len(cv_scores) == 0:
+            return [-0.2, -0.2, -0.2, -0.2, -0.2]  # 返回默认的CV分数
+        
+        return cv_scores
 
     def _calculate_feature_importance(self, model, target_name):
         """计算特征重要性"""

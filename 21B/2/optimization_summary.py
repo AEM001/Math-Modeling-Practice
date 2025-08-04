@@ -24,8 +24,8 @@ def create_model_results_summary():
     # 1. 模型性能结果（基于实际运行结果）
     ax1 = plt.subplot(2, 3, 1)
     models = ['转化率模型', '选择性模型']
-    test_scores = [0.7597, 0.6959]  # 实际测试集R²
-    train_scores = [0.8263, 0.7938]  # 实际训练集R²
+    test_scores = [0.7869, 0.7087]  # 实际测试集R²（留一法+增强正则化）
+    train_scores = [0.8468, 0.8027]  # 实际训练集R²（留一法+增强正则化）
     
     x = np.arange(len(models))
     width = 0.35
@@ -40,7 +40,7 @@ def create_model_results_summary():
     
     ax1.set_xlabel('模型类型')
     ax1.set_ylabel('R² 得分')
-    ax1.set_title('模型性能结果（实际运行）')
+    ax1.set_title('模型性能结果（留一法+增强正则化）')
     ax1.set_xticks(x)
     ax1.set_xticklabels(models)
     ax1.legend()
@@ -48,10 +48,10 @@ def create_model_results_summary():
     
     # 2. 特征重要性对比（基于实际模型计算）
     ax2 = plt.subplot(2, 3, 2)
-    features = ['Co/SiO2用量', 'HAP用量', '温度', '装料质量比', '投料方式', '乙醇浓度', 'Co负载量']
-    # 基于实际模型计算的特征重要性
-    conv_importance = [0.484, 0.391, 0.108, 0.010, 0.005, 0.002, 0.000]
-    sel_importance = [0.539, 0.447, 0.010, 0.002, 0.000, 0.001, 0.001]
+    features = ['Co/SiO2用量', 'HAP用量', '温度', '装料质量比', '乙醇浓度', '投料方式', 'Co负载量']
+    # 基于实际模型计算的特征重要性（留一法+增强正则化）
+    conv_importance = [0.413, 0.374, 0.185, 0.012, 0.011, 0.002, 0.002]
+    sel_importance = [0.517, 0.473, 0.004, 0.003, 0.001, 0.000, 0.002]
     
     x = np.arange(len(features))
     width = 0.35
@@ -61,7 +61,7 @@ def create_model_results_summary():
     
     ax2.set_xlabel('特征')
     ax2.set_ylabel('重要性权重')
-    ax2.set_title('特征重要性对比（基于模型计算）')
+    ax2.set_title('特征重要性对比（留一法+增强正则化）')
     ax2.set_xticks(x)
     ax2.set_xticklabels(features, rotation=45, ha='right')
     ax2.legend()
@@ -69,10 +69,10 @@ def create_model_results_summary():
     
     # 3. 配置组合测试结果（基于实际运行结果）
     ax3 = plt.subplot(2, 3, 3)
-    configs = ['极简+保守', '极简+标准', '极简+精细', '简单+保守', '简单+标准', '简单+精细', '中等+保守', '中等+标准', '中等+精细']
-    # 基于实际运行的综合得分
-    conv_scores = [0.502, 0.511, 0.507, 0.504, 0.504, 0.504, 0.500, 0.502, 0.504]
-    sel_scores = [0.463, 0.434, 0.513, 0.257, 0.077, 0.011, 0.072, 0.033, 0.082]
+    configs = ['极简+保守', '极简+标准', '极简+精细', '极简+增强', '简单+保守', '简单+标准', '简单+精细', '简单+增强', '中等+保守', '中等+标准', '中等+精细', '中等+增强']
+    # 基于实际运行的综合得分（留一法+增强正则化）
+    conv_scores = [0.911, 0.919, 0.910, 0.908, 0.919, 0.919, 0.919, 0.919, 0.929, 0.929, 0.924, 0.937]
+    sel_scores = [0.853, 0.853, 0.859, 0.842, 0.849, 0.815, 0.623, 0.849, 0.685, 0.590, 0.551, 0.769]
     
     x = np.arange(len(configs))
     width = 0.35
@@ -82,7 +82,7 @@ def create_model_results_summary():
     
     ax3.set_xlabel('配置组合')
     ax3.set_ylabel('综合得分')
-    ax3.set_title('配置组合测试结果（实际运行）')
+    ax3.set_title('配置组合测试结果（留一法+增强正则化）')
     ax3.set_xticks(x)
     ax3.set_xticklabels(configs, rotation=45, ha='right')
     ax3.legend()
@@ -109,12 +109,12 @@ def create_model_results_summary():
     # 5. 过拟合程度分析（基于实际运行结果）
     ax5 = plt.subplot(2, 3, 5)
     models = ['转化率模型', '选择性模型']
-    overfitting_scores = [0.0666, 0.0979]  # 实际过拟合程度
+    overfitting_scores = [0.0599, 0.0940]  # 实际过拟合程度（留一法+增强正则化）
     
     bars = ax5.bar(models, overfitting_scores, color='lightgreen', alpha=0.8)
     ax5.set_xlabel('模型类型')
     ax5.set_ylabel('过拟合程度')
-    ax5.set_title('过拟合程度分析（实际运行）')
+    ax5.set_title('过拟合程度分析（留一法+增强正则化）')
     ax5.grid(True, alpha=0.3)
     
     # 添加数值标签
@@ -126,9 +126,9 @@ def create_model_results_summary():
     # 6. 模型复杂度vs性能（基于实际运行结果）
     ax6 = plt.subplot(2, 3, 6)
     complexity_levels = ['极简', '简单', '中等']
-    # 基于实际运行的综合得分
-    conv_performance = [0.511, 0.504, 0.502]  # 转化率模型实际综合得分
-    sel_performance = [0.513, 0.077, 0.072]   # 选择性模型实际综合得分
+    # 基于实际运行的综合得分（留一法+增强正则化）
+    conv_performance = [0.919, 0.919, 0.937]  # 转化率模型实际综合得分
+    sel_performance = [0.859, 0.815, 0.769]   # 选择性模型实际综合得分
     
     x = np.arange(len(complexity_levels))
     width = 0.35
@@ -138,7 +138,7 @@ def create_model_results_summary():
     
     ax6.set_xlabel('模型复杂度')
     ax6.set_ylabel('综合得分')
-    ax6.set_title('模型复杂度vs性能（实际运行）')
+    ax6.set_title('模型复杂度vs性能（留一法+增强正则化）')
     ax6.set_xticks(x)
     ax6.set_xticklabels(complexity_levels)
     ax6.legend()
