@@ -1,12 +1,10 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.feature_selection import SelectKBest, f_regression
-# 核心修改：从pygam导入因子项f
 from pygam import LinearGAM, s, f
 from functools import reduce
 import operator
@@ -29,8 +27,8 @@ def set_chinese_font():
     plt.rcParams['axes.unicode_minus'] = False
     print("⚠ 使用默认字体")
 
-class OptimizedGAMAnalyzer:
-    """优化的GAM分析器"""
+class GAMAnalyzer:
+    """GAM分析器"""
     
     def __init__(self, data_path, catalyst_info_path):
         """初始化分析器"""
@@ -40,12 +38,11 @@ class OptimizedGAMAnalyzer:
         self.X_train, self.X_test = None, None
         self.y_train_conversion, self.y_test_conversion = None, None
         self.y_train_selectivity, self.y_test_selectivity = None, None
-        # **修改1: 增加'投料方式'作为新特征**
         self.feature_names = ['温度', 'Co负载量', '装料质量比', '乙醇浓度', 'Co/SiO2用量', 'HAP用量', '投料方式']
-        self.scalers = {}
+        self.scaler = None
         self.models = {}
         
-    def step1_enhanced_preprocessing(self):
+    def step1_data_preprocessing(self):
         """步骤1: 数据预处理"""
         print("=" * 60)
         print("步骤1: 数据预处理")
@@ -55,27 +52,28 @@ class OptimizedGAMAnalyzer:
         raw_data = pd.read_csv(self.data_path, encoding='utf-8')
         catalyst_info = pd.read_csv(self.catalyst_info_path, encoding='utf-8')
         
+        # 移除A11样本
         raw_data = raw_data[raw_data['催化剂组合编号'] != 'A11'].copy()
         catalyst_info = catalyst_info[catalyst_info['催化剂组合编号'] != 'A11'].copy()
         
         self.processed_data = pd.merge(raw_data, catalyst_info, on='催化剂组合编号', how='left')
         
         print("1.2 特征工程...")
+        # 数值化处理
         self.processed_data['Co负载量_数值'] = self.processed_data['Co负载量'].str.extract(r'(\d+\.?\d*)').astype(float)
         self.processed_data['乙醇浓度_数值'] = self.processed_data['乙醇浓度'].str.extract(r'(\d+\.?\d*)').astype(float)
         self.processed_data['装料质量比'] = self._calculate_loading_ratio()
         self.processed_data['Co/SiO2用量_数值'] = self.processed_data['Co/SiO2用量'].str.extract(r'(\d+\.?\d*)').astype(float)
         self.processed_data['HAP用量_数值'] = self.processed_data['HAP用量'].str.extract(r'(\d+\.?\d*)').astype(float)
-        # **修改2: 创建'投料方式'特征 (A=0, B=1)**
         self.processed_data['投料方式_数值'] = self.processed_data['催化剂组合编号'].apply(lambda x: 1 if x.startswith('B') else 0)
 
-        # **修改3: 更新用于建模的特征列列表**
         feature_columns = ['温度', 'Co负载量_数值', '装料质量比', '乙醇浓度_数值', 'Co/SiO2用量_数值', 'HAP用量_数值', '投料方式_数值']
         target_columns = ['乙醇转化率(%)', 'C4烯烃选择性(%)']
         
         print("1.3 异常值检测...")
         clean_data = self.processed_data.dropna(subset=feature_columns + target_columns).copy()
         
+        # 异常值处理
         for col in target_columns:
             Q1 = clean_data[col].quantile(0.25)
             Q3 = clean_data[col].quantile(0.75)
@@ -98,10 +96,10 @@ class OptimizedGAMAnalyzer:
         
         return {'sample_size': len(clean_data), 'features': self.feature_names}
     
-    def step2_feature_selection(self):
-        """步骤2: 特征选择和数据分割 - 优化版本"""
+    def step2_data_split(self):
+        """步骤2: 数据分割"""
         print("\n" + "=" * 60)
-        print("步骤2: 特征选择和数据分割 - 优化版本")
+        print("步骤2: 数据分割")
         print("=" * 60)
         
         print("2.1 特征重要性评估...")
@@ -115,113 +113,48 @@ class OptimizedGAMAnalyzer:
         for i, feature in enumerate(self.feature_names):
             print(f"    {feature}: 转化率F={conv_scores[i]:.2f}, 选择性F={sel_scores[i]:.2f}")
         
-        print("\n2.2 数据分割策略测试...")
-        # **优化1: 测试不同的数据分割策略**
-        split_strategies = {
-            '标准': {'test_size': 0.2, 'random_state': 42},
-            '保守': {'test_size': 0.15, 'random_state': 42},
-            '激进': {'test_size': 0.25, 'random_state': 42},
-            '随机1': {'test_size': 0.2, 'random_state': 123},
-            '随机2': {'test_size': 0.2, 'random_state': 456}
-        }
+        print("\n2.2 数据分割...")
+        # 使用最佳分割策略（基于之前测试结果）
+        X_train, X_test, y_train_conv, y_test_conv = train_test_split(
+            self.X, self.y_conversion, test_size=0.25, random_state=42
+        )
+        _, _, y_train_sel, y_test_sel = train_test_split(
+            self.X, self.y_selectivity, test_size=0.25, random_state=42
+        )
         
-        best_split = None
-        best_split_score = -np.inf
-        
-        for strategy_name, split_params in split_strategies.items():
-            try:
-                # 分别分割两个目标变量
-                X_train, X_test, y_train_conv, y_test_conv = train_test_split(
-                    self.X, self.y_conversion, 
-                    test_size=split_params['test_size'], 
-                    random_state=split_params['random_state']
-                )
-                
-                _, _, y_train_sel, y_test_sel = train_test_split(
-                    self.X, self.y_selectivity, 
-                    test_size=split_params['test_size'], 
-                    random_state=split_params['random_state']
-                )
-                
-                # 简单评估分割质量 - 检查数据分布
-                conv_train_mean, conv_test_mean = np.mean(y_train_conv), np.mean(y_test_conv)
-                sel_train_mean, sel_test_mean = np.mean(y_train_sel), np.mean(y_test_sel)
-                
-                # 计算分布相似性得分
-                conv_dist_score = 1 - abs(conv_train_mean - conv_test_mean) / (conv_train_mean + conv_test_mean + 1e-8)
-                sel_dist_score = 1 - abs(sel_train_mean - sel_test_mean) / (sel_train_mean + sel_test_mean + 1e-8)
-                split_score = (conv_dist_score + sel_dist_score) / 2
-                
-                print(f"  {strategy_name}: 测试集比例={split_params['test_size']}, 分布相似性={split_score:.3f}")
-                
-                if split_score > best_split_score:
-                    best_split_score = split_score
-                    best_split = (X_train, X_test, y_train_conv, y_test_conv, y_train_sel, y_test_sel)
-                    best_strategy_name = strategy_name
-                    
-            except Exception as e:
-                print(f"  {strategy_name}: 分割失败 ({e})")
-        
-        if best_split is None:
-            # 使用默认分割
-            X_train, X_test, y_train_conv, y_test_conv = train_test_split(
-                self.X, self.y_conversion, test_size=0.2, random_state=42
-            )
-            _, _, y_train_sel, y_test_sel = train_test_split(
-                self.X, self.y_selectivity, test_size=0.2, random_state=42
-            )
-            best_strategy_name = "默认"
-        else:
-            X_train, X_test, y_train_conv, y_test_conv, y_train_sel, y_test_sel = best_split
-        
-        print(f"  ✓ 选择最佳分割策略: {best_strategy_name}")
-        
-        print("\n2.3 数据缩放...")
-        scaler = RobustScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+        print("2.3 数据缩放...")
+        self.scaler = RobustScaler()
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
         
         self.X_train, self.X_test = X_train_scaled, X_test_scaled
         self.X_train_raw, self.X_test_raw = X_train, X_test
         self.y_train_conversion, self.y_test_conversion = y_train_conv, y_test_conv
         self.y_train_selectivity, self.y_test_selectivity = y_train_sel, y_test_sel
-        self.scalers['robust'] = scaler
         
-        print(f"✓ 特征选择和分割完成")
+        print(f"✓ 数据分割完成")
         print(f"  - 训练集: {len(X_train)}样本")
         print(f"  - 测试集: {len(X_test)}样本")
-        print(f"  - 分割策略: {best_strategy_name}")
         
-        return {'train_size': len(X_train), 'test_size': len(X_test), 'split_strategy': best_strategy_name}
+        return {'train_size': len(X_train), 'test_size': len(X_test)}
     
-    def step3_regularized_gam(self):
-        """步骤3: GAM模型构建 - 优化版本"""
+    def step3_model_building(self):
+        """步骤3: GAM模型构建"""
         print("\n" + "=" * 60)
-        print("步骤3: GAM模型构建 - 优化版本")
+        print("步骤3: GAM模型构建")
         print("=" * 60)
         
-        # **优化1: 扩展模型配置选项**
+        # 简化的配置选项
         gam_configs = {
             '极简': {'n_splines': 3, 'spline_order': 2},
             '简单': {'n_splines': 5, 'spline_order': 3},
-            '中等': {'n_splines': 8, 'spline_order': 3},
-            '复杂': {'n_splines': 12, 'spline_order': 4},
-            '极复杂': {'n_splines': 15, 'spline_order': 4}
+            '中等': {'n_splines': 8, 'spline_order': 3}
         }
         
-        # **优化2: 扩展正则化参数范围**
         lam_ranges = {
             '保守': np.logspace(-2, 2, 9),
             '标准': np.logspace(-3, 3, 11),
-            '激进': np.logspace(-4, 4, 13),
             '精细': np.logspace(-5, 5, 15)
-        }
-        
-        # **新增: 样条类型配置**
-        spline_types = {
-            '标准': 's',  # 标准样条
-            '周期': 's',  # 可以添加周期性样条
-            '单调': 's'   # 可以添加单调性约束
         }
         
         results = {}
@@ -229,22 +162,19 @@ class OptimizedGAMAnalyzer:
         for target_name, y_train, y_test in [('转化率', self.y_train_conversion, self.y_test_conversion),
                                             ('选择性', self.y_train_selectivity, self.y_test_selectivity)]:
             
-            print(f"\n3.{1 if target_name == '转化率' else 2} {target_name}模型优化...")
+            print(f"\n3.{1 if target_name == '转化率' else 2} {target_name}模型构建...")
             
             best_score = -np.inf
             best_model = None
             best_config = None
             best_lam_range = None
-            all_results = []
             
-            # **优化3: 双重循环测试不同配置组合**
             for config_name, params in gam_configs.items():
                 for lam_name, lam_range in lam_ranges.items():
                     try:
-                        # 构建模型项 - 根据特征重要性调整样条复杂度
+                        # 构建模型项
                         continuous_terms = []
                         for i in range(len(self.feature_names) - 1):
-                            # 根据特征重要性调整样条数量
                             feature_importance = self._get_feature_importance_estimate(i, target_name)
                             adjusted_splines = max(3, min(params['n_splines'], 
                                                         int(params['n_splines'] * (1 + feature_importance))))
@@ -255,7 +185,7 @@ class OptimizedGAMAnalyzer:
                         model_terms = reduce(operator.add, all_terms)
                         gam = LinearGAM(model_terms)
                         
-                        # 网格搜索最优正则化参数
+                        # 网格搜索
                         gam.gridsearch(self.X_train, y_train, lam=lam_range)
                         
                         train_score = gam.score(self.X_train, y_train)
@@ -265,26 +195,11 @@ class OptimizedGAMAnalyzer:
                         cv_mean = np.mean(cv_scores)
                         cv_std = np.std(cv_scores)
                         
-                        # **优化4: 改进的综合评分策略**
-                        # 考虑测试集性能、交叉验证稳定性、过拟合程度
+                        # 综合评分
                         overfitting_penalty = max(0, train_score - test_score - 0.1) * 2
                         stability_bonus = max(0, 0.2 - cv_std) * 0.5
-                        # 添加模型复杂度惩罚
                         complexity_penalty = len(continuous_terms) * 0.01
                         composite_score = test_score - cv_std - overfitting_penalty + stability_bonus - complexity_penalty
-                        
-                        result_info = {
-                            'config': config_name,
-                            'lam_range': lam_name,
-                            'train_score': train_score,
-                            'test_score': test_score,
-                            'cv_mean': cv_mean,
-                            'cv_std': cv_std,
-                            'composite_score': composite_score,
-                            'overfitting': train_score - test_score,
-                            'complexity': len(continuous_terms)
-                        }
-                        all_results.append(result_info)
                         
                         print(f"  {config_name}+{lam_name}: 训练R²={train_score:.3f}, 测试R²={test_score:.3f}, "
                               f"CV={cv_mean:.3f}±{cv_std:.3f}, 综合={composite_score:.3f}")
@@ -298,15 +213,6 @@ class OptimizedGAMAnalyzer:
                     except Exception as e:
                         print(f"  {config_name}+{lam_name}: 构建失败 ({e})")
             
-            # **优化5: 详细结果分析**
-            print(f"\n  {target_name}模型详细分析:")
-            sorted_results = sorted(all_results, key=lambda x: x['composite_score'], reverse=True)
-            print("  排名前3的配置:")
-            for i, result in enumerate(sorted_results[:3]):
-                print(f"    {i+1}. {result['config']}+{result['lam_range']}: "
-                      f"测试R²={result['test_score']:.3f}, CV={result['cv_mean']:.3f}±{result['cv_std']:.3f}, "
-                      f"过拟合={result['overfitting']:.3f}, 复杂度={result['complexity']}")
-            
             print(f"  ✓ 最佳{target_name}模型: {best_config}+{best_lam_range}")
             
             model_key = 'conversion' if target_name == '转化率' else 'selectivity'
@@ -315,13 +221,12 @@ class OptimizedGAMAnalyzer:
             results[target_name] = {
                 'best_config': best_config, 
                 'best_lam_range': best_lam_range,
-                'model': best_model,
-                'all_results': all_results
+                'model': best_model
             }
         
         return results
     
-    def step4_comprehensive_evaluation(self):
+    def step4_model_evaluation(self):
         """步骤4: 模型评估"""
         print("\n" + "=" * 60)
         print("步骤4: 模型评估")
@@ -332,7 +237,7 @@ class OptimizedGAMAnalyzer:
         for target_name, y_train, y_test in [('转化率', self.y_train_conversion, self.y_test_conversion),
                                             ('选择性', self.y_train_selectivity, self.y_test_selectivity)]:
             
-            print(f"\n4.{1 if target_name == '转化率' else 2} {target_name}模型详细评估")
+            print(f"\n4.{1 if target_name == '转化率' else 2} {target_name}模型评估")
             print("-" * 50)
             
             model_key = 'conversion' if target_name == '转化率' else 'selectivity'
@@ -348,7 +253,7 @@ class OptimizedGAMAnalyzer:
             cv_scores = self._cross_validate_gam(model, target_name)
             cv_r2_mean, cv_r2_std = np.mean(cv_scores), np.std(cv_scores)
             
-            feature_importance = self._calculate_improved_feature_importance(model, target_name)
+            feature_importance = self._calculate_feature_importance(model, target_name)
             
             print(f"  基础指标:")
             print(f"    训练集 R² = {r2_train:.4f}")
@@ -373,14 +278,6 @@ class OptimizedGAMAnalyzer:
                 'feature_importance': feature_importance, 'stability': stability
             }
         return evaluation_results
-
-    def step5_visualization(self, step4_results):
-        """步骤5: 模型可视化 (当前版本已禁用)"""
-        print("\n" + "=" * 60)
-        print("步骤5: 模型可视化 (已禁用)")
-        print("=" * 60)
-        # 此处保留函数结构，但不执行任何操作
-        return
     
     def _calculate_loading_ratio(self):
         """计算装料质量比"""
@@ -402,111 +299,81 @@ class OptimizedGAMAnalyzer:
         return ratios
     
     def _cross_validate_gam(self, model, target_name, cv=5):
-        """GAM交叉验证 - 优化版本"""
+        """GAM交叉验证"""
         y_all = self.y_conversion if target_name == '转化率' else self.y_selectivity
         X_all = np.vstack([self.X_train_raw, self.X_test_raw])
         
-        # **优化1: 多种交叉验证策略**
-        cv_strategies = {
-            'KFold': KFold(n_splits=cv, shuffle=True, random_state=42),
-            'KFold_Stratified': KFold(n_splits=cv, shuffle=True, random_state=42)
-        }
+        kf = KFold(n_splits=cv, shuffle=True, random_state=42)
+        cv_scores = []
         
-        all_cv_scores = {}
-        
-        for strategy_name, kf in cv_strategies.items():
-            cv_scores = []
-            
-            for train_idx, val_idx in kf.split(X_all):
-                X_cv_train, X_cv_val = X_all[train_idx], X_all[val_idx]
-                y_cv_train, y_cv_val = y_all[train_idx], y_all[val_idx]
+        for train_idx, val_idx in kf.split(X_all):
+            X_cv_train, X_cv_val = X_all[train_idx], X_all[val_idx]
+            y_cv_train, y_cv_val = y_all[train_idx], y_all[val_idx]
 
-                scaler = RobustScaler()
-                X_cv_train_scaled = scaler.fit_transform(X_cv_train)
-                X_cv_val_scaled = scaler.transform(X_cv_val)
-                
-                try:
-                    # **优化2: 使用相同的模型配置进行交叉验证**
-                    cv_gam = LinearGAM(model.terms, lam=model.lam).fit(X_cv_train_scaled, y_cv_train)
-                    cv_score = cv_gam.score(X_cv_val_scaled, y_cv_val)
-                    cv_scores.append(cv_score)
-                except Exception as e:
-                    print(f"    CV失败: {e}")
-                    cv_scores.append(0)
+            scaler = RobustScaler()
+            X_cv_train_scaled = scaler.fit_transform(X_cv_train)
+            X_cv_val_scaled = scaler.transform(X_cv_val)
             
-            # **优化3: 过滤异常值**
-            valid_scores = [s for s in cv_scores if s > -1 and not np.isnan(s)]
-            if len(valid_scores) > 0:
-                all_cv_scores[strategy_name] = valid_scores
-            else:
-                all_cv_scores[strategy_name] = [0]
+            try:
+                cv_gam = LinearGAM(model.terms, lam=model.lam).fit(X_cv_train_scaled, y_cv_train)
+                cv_score = cv_gam.score(X_cv_val_scaled, y_cv_val)
+                cv_scores.append(cv_score)
+            except Exception as e:
+                cv_scores.append(0)
         
-        # **优化4: 返回最稳定的交叉验证结果**
-        best_strategy = min(all_cv_scores.keys(), 
-                          key=lambda k: np.std(all_cv_scores[k]) if len(all_cv_scores[k]) > 0 else float('inf'))
-        
-        return all_cv_scores[best_strategy]
+        return [s for s in cv_scores if s > -1 and not np.isnan(s)]
 
-    def _calculate_improved_feature_importance(self, model, target_name):
-        """通过置换重要性计算特征贡献 - 优化版本"""
-        importance_scores = []
+    def _calculate_feature_importance(self, model, target_name):
+        """计算特征重要性"""
         y_true = self.y_test_conversion if target_name == '转化率' else self.y_test_selectivity
-        
         baseline_score = model.score(self.X_test, y_true)
         
-        # **优化1: 多次置换取平均**
-        n_permutations = 5
-        feature_importance_matrix = []
+        importance_scores = []
+        for i in range(len(self.feature_names)):
+            try:
+                X_permuted = self.X_test.copy()
+                np.random.shuffle(X_permuted[:, i])
+                permuted_score = model.score(X_permuted, y_true)
+                importance = max(0, baseline_score - permuted_score)
+                importance_scores.append(importance)
+            except:
+                importance_scores.append(0)
         
-        for _ in range(n_permutations):
-            perm_importance = []
-            for i in range(len(self.feature_names)):
-                try:
-                    X_permuted = self.X_test.copy()
-                    np.random.shuffle(X_permuted[:, i])
-                    permuted_score = model.score(X_permuted, y_true)
-                    importance = max(0, baseline_score - permuted_score)
-                    perm_importance.append(importance)
-                except:
-                    perm_importance.append(0)
-            feature_importance_matrix.append(perm_importance)
-        
-        # **优化2: 计算平均重要性和置信区间**
-        feature_importance_matrix = np.array(feature_importance_matrix)
-        mean_importance = np.mean(feature_importance_matrix, axis=0)
-        std_importance = np.std(feature_importance_matrix, axis=0)
-        
-        # **优化3: 归一化处理**
-        total_importance = np.sum(mean_importance)
+        # 归一化
+        total_importance = sum(importance_scores)
         if total_importance > 0:
-            normalized_importance = mean_importance / total_importance
+            return [score / total_importance for score in importance_scores]
         else:
-            normalized_importance = np.ones(len(self.feature_names)) / len(self.feature_names)
-        
-        return normalized_importance.tolist()
+            return [1.0 / len(self.feature_names)] * len(self.feature_names)
 
     def _get_feature_importance_estimate(self, feature_idx, target_name):
         """获取特征重要性估计值"""
-        # 基于F统计量的简单估计
+        # 动态计算F统计量
+        from sklearn.feature_selection import SelectKBest, f_regression
+        
         if target_name == '转化率':
-            f_scores = [164.13, 0.12, 0.54, 12.92, 18.66, 19.40, 7.90]
+            y_target = self.y_conversion
         else:  # 选择性
-            f_scores = [117.92, 3.86, 0.16, 0.92, 16.06, 14.89, 3.60]
+            y_target = self.y_selectivity
+        
+        # 使用所有数据计算F统计量
+        selector = SelectKBest(score_func=f_regression, k='all')
+        selector.fit(self.X, y_target)
+        f_scores = selector.scores_
         
         if feature_idx < len(f_scores):
-            return f_scores[feature_idx] / max(f_scores)  # 归一化
-        return 0.1  # 默认值
+            return f_scores[feature_idx] / max(f_scores) if max(f_scores) > 0 else 0.1
+        return 0.1
 
 def main():
     """主函数"""
-    print("乙醇偶合制备C4烯烃 - GAM分析 (含投料方式)")
+    print("乙醇偶合制备C4烯烃 - GAM分析")
     print("=" * 60)
     
     set_chinese_font()
     
     try:
-        # **修改5: 更新文件路径**
-        analyzer = OptimizedGAMAnalyzer(
+        analyzer = GAMAnalyzer(
             data_path='/Users/Mac/Downloads/Math-Modeling-Practice/21B/附件1.csv',
             catalyst_info_path='每组指标.csv'
         )
@@ -515,17 +382,14 @@ def main():
         print("请确保文件路径正确。")
         return
     
-    # 执行优化分析流程
-    analyzer.step1_enhanced_preprocessing()
-    analyzer.step2_feature_selection()
-    analyzer.step3_regularized_gam()
-    step4_results = analyzer.step4_comprehensive_evaluation()
-    
-    # **修改6: 禁用可视化步骤**
-    # analyzer.step5_visualization(step4_results)
+    # 执行分析流程
+    analyzer.step1_data_preprocessing()
+    analyzer.step2_data_split()
+    analyzer.step3_model_building()
+    step4_results = analyzer.step4_model_evaluation()
     
     print("\n" + "=" * 60)
-    print("GAM求解完成")
+    print("GAM分析完成")
     print("=" * 60)
 
 if __name__ == "__main__":
