@@ -97,10 +97,8 @@ def get_discrete_options(data):
     Returns:
         dict: 包含各离散变量的所有可能取值
     """
-    # 使用方案中定义的固定选项
+    # C 和 C_e 已变为连续变量，只保留 M
     discrete_options = {
-        'C': [0.5, 1.0, 2.0, 5.0],
-        'C_e': [0.3, 0.9, 1.68, 2.1],
         'M': [0, 1]
     }
     
@@ -118,8 +116,11 @@ def get_continuous_bounds(data):
     """
     bounds = {
         'T': (data['T'].min(), data['T'].max()),
-        'total_mass': (83, 400),  # 根据题目要求
-        'loading_ratio': (0.49, 2.03)  # 根据题目要求
+        'total_mass': (83, 400),
+        'loading_ratio': (0.49, 2.03),
+        # 新增：将 C 和 C_e 定义为连续变量并给出范围
+        'C': (0.5, 5.0),
+        'C_e': (0.3, 2.1)
     }
     return bounds
 

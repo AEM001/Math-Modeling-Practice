@@ -3,7 +3,7 @@ from scipy.optimize import minimize
 from itertools import product
 import pandas as pd
 
-def create_objective_function(model, poly_features, scaler, fixed_discrete_params):
+def create_objective_function(model, poly_features, scaler, fixed_m_value):
     """
     为多维连续优化创建目标函数
     
@@ -11,10 +11,10 @@ def create_objective_function(model, poly_features, scaler, fixed_discrete_param
         model: 训练好的模型
         poly_features: 多项式特征对象
         scaler: 标准化对象
-        fixed_discrete_params: 一个包含固定的离散变量值的列表 [C, C_e, M]
+        fixed_m_value: 固定的装料方式 M (0或1)
         
     Returns:
-        function: 目标函数，接收一个连续变量列表 [T, total_mass, loading_ratio]
+        function: 目标函数，接收一个包含5个连续变量的列表
     """
     
     def objective_function(continuous_params):
@@ -22,19 +22,19 @@ def create_objective_function(model, poly_features, scaler, fixed_discrete_param
         目标函数：返回负的C4烯烃收率（因为优化器求解最小值）
         
         Args:
-            continuous_params: 连续变量 [T, total_mass, loading_ratio]
+            continuous_params: [T, total_mass, loading_ratio, C, C_e]
             
         Returns:
             float: 负的C4烯烃收率
         """
-        # 组合连续变量和固定的离散变量
+        # 组合5个连续变量和1个固定的离散变量
         X_input = np.array([
             continuous_params[0],  # T
             continuous_params[1],  # total_mass
             continuous_params[2],  # loading_ratio
-            fixed_discrete_params[0],  # C
-            fixed_discrete_params[1],  # C_e
-            fixed_discrete_params[2]   # M
+            continuous_params[3],  # C (现在是连续的)
+            continuous_params[4],  # C_e (现在是连续的)
+            fixed_m_value          # M
         ])
         
         # 标准化输入
@@ -54,11 +54,11 @@ def create_objective_function(model, poly_features, scaler, fixed_discrete_param
 def find_optimal_conditions(model, poly_features, scaler, 
                           continuous_bounds, discrete_options):
     """
-    寻找最优工艺条件
+    寻找最优工艺条件 (改进版：使用多起点优化策略)
     
     优化策略：
-    1. 遍历所有离散变量组合
-    2. 对每个组合，优化三个连续变量（T, total_mass, loading_ratio）
+    1. 遍历唯一的离散变量 M (装料方式)
+    2. 对每个 M 值，从多个随机起点进行优化，以寻找全局最优解
     
     Args:
         model: 训练好的模型
@@ -71,81 +71,103 @@ def find_optimal_conditions(model, poly_features, scaler,
         dict: 包含最优参数组合和最大收率
     """
     
-    print("开始寻找最优工艺条件...")
+    print("开始寻找最优工艺条件 (采用多起点优化策略)...")
     print(f"温度范围: {continuous_bounds['T'][0]}°C - {continuous_bounds['T'][1]}°C")
     print(f"总质量范围: {continuous_bounds['total_mass'][0]} - {continuous_bounds['total_mass'][1]} mg")
     print(f"装料比范围: {continuous_bounds['loading_ratio'][0]} - {continuous_bounds['loading_ratio'][1]}")
+    print(f"Co负载量范围: {continuous_bounds['C'][0]} - {continuous_bounds['C'][1]} wt%")
+    print(f"乙醇浓度范围: {continuous_bounds['C_e'][0]} - {continuous_bounds['C_e'][1]} ml/min")
     
-    # 1. 获取所有离散变量组合
-    discrete_vars = ['C', 'C_e', 'M']
-    discrete_combinations = list(product(*[discrete_options[var] for var in discrete_vars]))
+    # 1. 获取唯一的离散变量组合 (现在只有M)
+    m_options = discrete_options['M']
+    print(f"需要为 {len(m_options)} 种装料方式分别进行优化")
     
-    print(f"需要评估 {len(discrete_combinations)} 种离散变量组合")
-    
-    # 2. 准备连续变量的边界
+    # 2. 准备所有5个连续变量的边界
     bounds_list = [
         continuous_bounds['T'],
         continuous_bounds['total_mass'],
-        continuous_bounds['loading_ratio']
+        continuous_bounds['loading_ratio'],
+        continuous_bounds['C'],
+        continuous_bounds['C_e']
     ]
     
     # 存储所有结果
     all_results = []
-    best_result = None
-    best_yield = -np.inf
+    best_result_overall = None
+    best_yield_overall = -np.inf
     
-    # 3. 遍历所有离散变量组合
-    for i, discrete_combo in enumerate(discrete_combinations):
-        if i % 10 == 0:
-            print(f"正在评估第 {i+1}/{len(discrete_combinations)} 种离散组合...")
+    # 定义多起点优化的起点数量
+    n_starts = 20
+    print(f"每个装料方式将使用 {n_starts} 个随机起点进行优化，以增加找到全局最优解的概率。")
+    
+    # 3. 遍历唯一的离散变量 M
+    for m_value in m_options:
+        print(f"\n正在为装料方式 M={m_value} ('{'B系列' if m_value == 1 else 'A系列'}') 进行优化...")
         
-        # 4. 为当前离散组合创建目标函数
-        objective_func = create_objective_function(model, poly_features, scaler, discrete_combo)
+        # 4. 为当前 M 值创建目标函数
+        objective_func = create_objective_function(model, poly_features, scaler, m_value)
         
-        # 5. 设置连续变量的初始猜测值 (使用边界的中间值)
-        initial_guess = [np.mean(b) for b in bounds_list]
-        
-        # 6. 使用scipy.optimize.minimize进行多维优化
-        try:
-            result = minimize(
-                objective_func,
-                initial_guess,
-                method='L-BFGS-B',  # 支持边界约束的高效算法
-                bounds=bounds_list
-            )
+        # 当前M值下的最优解
+        best_yield_for_m = -np.inf
+        best_params_for_m = None
+
+        # 5. 多起点优化循环
+        for i in range(n_starts):
+            # 生成随机初始猜测值
+            initial_guess = [np.random.uniform(low, high) for low, high in bounds_list]
             
-            if result.success:
-                optimal_yield = -result.fun
-                optimal_continuous_params = result.x
+            # 6. 使用scipy.optimize.minimize进行5维连续优化
+            try:
+                result = minimize(
+                    objective_func,
+                    initial_guess,
+                    method='L-BFGS-B',
+                    bounds=bounds_list
+                )
                 
-                # 记录结果
-                result_dict = {
-                    'T': optimal_continuous_params[0],
-                    'total_mass': optimal_continuous_params[1],
-                    'loading_ratio': optimal_continuous_params[2],
-                    'C': discrete_combo[0],
-                    'C_e': discrete_combo[1],
-                    'M': discrete_combo[2],
-                    'yield': optimal_yield
-                }
-                
-                all_results.append(result_dict)
-                
-                # 更新最优结果
-                if optimal_yield > best_yield:
-                    best_yield = optimal_yield
-                    best_result = result_dict.copy()
-                    
-        except Exception as e:
-            print(f"组合 {discrete_combo} 优化失败: {e}")
-            continue
-    
+                if result.success:
+                    current_yield = -result.fun
+                    # 如果找到了更好的解，则更新
+                    if current_yield > best_yield_for_m:
+                        best_yield_for_m = current_yield
+                        best_params_for_m = result.x
+            except Exception as e:
+                # 即使单个起点失败，也继续尝试其他起点
+                continue
+        
+        # 记录当前M值的最佳结果
+        if best_params_for_m is not None:
+            result_dict = {
+                'T': best_params_for_m[0],
+                'total_mass': best_params_for_m[1],
+                'loading_ratio': best_params_for_m[2],
+                'C': best_params_for_m[3],
+                'C_e': best_params_for_m[4],
+                'M': m_value,
+                'yield': best_yield_for_m
+            }
+            all_results.append(result_dict)
+            
+            # 更新全局最优结果
+            if best_yield_for_m > best_yield_overall:
+                best_yield_overall = best_yield_for_m
+                best_result_overall = result_dict.copy()
+
     # 按收率排序
     all_results.sort(key=lambda x: x['yield'], reverse=True)
     
     print(f"\n优化完成！")
-    print(f"评估了 {len(all_results)} 种有效组合")
-    print(f"最优收率: {best_yield:.4f}")
+    if best_result_overall:
+        print(f"最优收率: {best_yield_overall:.4f}")
+    else:
+        print("警告：未能找到任何有效的优化解。")
+    
+    # 返回最优结果和所有结果
+    return {
+        'best_params': best_result_overall,
+        'max_yield': best_yield_overall,
+        'all_results': all_results[:10]
+    }
     
     # 返回最优结果和所有结果
     return {

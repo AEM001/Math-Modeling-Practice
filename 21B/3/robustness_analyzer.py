@@ -84,13 +84,14 @@ def perform_robustness_analysis(best_params, model, poly_features, scaler,
     for i, (param_name, param_label) in enumerate(zip(param_names, param_labels)):
         print(f"\n正在分析 {param_label} 的稳健性...")
         
-        if param_name in ['T', 'total_mass', 'loading_ratio']:
+        # 将 C 和 C_e 加入连续变量的判断
+        if param_name in ['T', 'total_mass', 'loading_ratio', 'C', 'C_e']:
             # 连续变量
             yield_changes = analyze_continuous_parameter(
                 base_params, i, param_name, model, poly_features, scaler
             )
         else:
-            # 离散变量
+            # 离散变量 (现在只剩下 M)
             yield_changes = analyze_discrete_parameter(
                 base_params, i, param_name, discrete_options[param_name], 
                 model, poly_features, scaler

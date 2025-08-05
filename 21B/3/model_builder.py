@@ -103,6 +103,9 @@ def build_and_train_rsm(dataframe):
     else:
         print("❌ 模型泛化能力不足，需要重新设计")
     
+    # 9. 保存模型参数到文件
+    save_model_parameters(ridge_cv_model, poly_features, feature_columns)
+    
     print("\n响应面模型构建完成！")
     
     return ridge_cv_model, poly_features, scaler
@@ -129,4 +132,46 @@ def predict_yield(model, poly_features, scaler, X_input):
     # 预测
     prediction = model.predict(X_poly)
     
-    return prediction[0] 
+    return prediction[0]
+
+def save_model_parameters(model, poly_features, feature_columns, filename="model_equation.txt"):
+    """
+    将训练好的Ridge模型的完整方程保存到文本文件中。
+
+    Args:
+        model: 训练好的RidgeCV模型。
+        poly_features: 训练时使用的PolynomialFeatures对象。
+        feature_columns: 原始特征的名称列表。
+        filename: 保存参数的文件名。
+    """
+    print(f"正在将模型方程保存到 {filename}...")
+    
+    # 获取多项式特征的名称
+    poly_feature_names = poly_features.get_feature_names_out(feature_columns)
+    
+    # 获取模型的系数和截距
+    coefficients = model.coef_
+    intercept = model.intercept_
+    
+    # 构建方程字符串
+    equation = f"Y = {intercept:.4f} \\\n"
+    for coef, name in zip(coefficients, poly_feature_names):
+        if coef >= 0:
+            equation += f"    + {abs(coef):.4f} * ({name}) \\\n"
+        else:
+            equation += f"    - {abs(coef):.4f} * ({name}) \\\n"
+            
+    # 移除最后的 " \"
+    equation = equation.rstrip(' \\\n')
+    
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write("响应面模型 (RidgeCV) 方程:\n")
+            f.write("="*50 + "\n")
+            f.write("Y 代表预测的C4烯烃收率。\n")
+            f.write("所有特征（T, total_mass等）在代入方程前都经过了标准化处理。\n")
+            f.write("="*50 + "\n\n")
+            f.write(equation)
+        print(f"✓ 模型方程已成功保存到 {filename}")
+    except Exception as e:
+        print(f"错误：保存模型参数失败 - {e}") 
