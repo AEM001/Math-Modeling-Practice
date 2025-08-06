@@ -77,13 +77,16 @@ def analyze_time_series_data():
     
     # 加载数据
     try:
-        df = pd.read_csv('../附件2.csv')
+        df = pd.read_csv('../../附件2.csv')
     except FileNotFoundError:
         try:
-            df = pd.read_csv('附件2.csv')
+            df = pd.read_csv('../附件2.csv')
         except FileNotFoundError:
-            print("错误：未找到 '附件2.csv' 文件。")
-            return
+            try:
+                df = pd.read_csv('附件2.csv')
+            except FileNotFoundError:
+                print("错误：未找到 '附件2.csv' 文件。")
+                return
     
     # 清理数据
     df = df.dropna()
@@ -172,15 +175,16 @@ def analyze_time_series_data():
     # =================== 3. 产物选择性竞争模型 ===================
     print(f"\n3. 产物选择性竞争模型分析")
     
-    # 选择主要产物进行竞争分析
-    main_products = ['C4烯烃选择性', '乙烯选择性', '乙醛选择性']
-    main_selectivities = df[main_products].values
+    # 分析所有产物的选择性竞争
+    all_products = ['乙烯选择性', 'C4烯烃选择性', '乙醛选择性', 
+                    '碳数为4-12脂肪醇选择性', '甲基苯甲醛和甲基苯甲醇选择性', '其他选择性']
+    all_selectivities = df[all_products].values
     
     competition_results = {}
     
-    for i, product in enumerate(main_products):
+    for i, product in enumerate(all_products):
         try:
-            selectivity = main_selectivities[:, i]
+            selectivity = all_selectivities[:, i]
             
             # 拟合竞争模型 S = A * exp(B*t)
             popt_comp, pcov_comp = curve_fit(competition_model_single, time, selectivity,
@@ -242,10 +246,10 @@ def analyze_time_series_data():
     
     # 4.3 产物选择性竞争图
     ax3 = axes[1, 0]
-    colors = ['green', 'purple', 'orange']
-    for i, (product, color) in enumerate(zip(main_products, colors)):
-        selectivity = main_selectivities[:, i]
-        ax3.scatter(time, selectivity, color=color, label=f'{product} (实验)', s=40)
+    colors = ['green', 'purple', 'orange', 'red', 'brown', 'gray']
+    for i, (product, color) in enumerate(zip(all_products, colors)):
+        selectivity = all_selectivities[:, i]
+        ax3.scatter(time, selectivity, color=color, label=f'{product} (实验)', s=30)
         
         if competition_results[product] is not None:
             fitted = competition_results[product]['fitted']
@@ -292,7 +296,7 @@ def analyze_time_series_data():
     
     # 竞争模型结果
     competition_data = []
-    for product in main_products:
+    for product in all_products:
         if competition_results[product] is not None:
             result = competition_results[product]
             competition_data.append({
@@ -326,7 +330,7 @@ def analyze_time_series_data():
         print(f"   - 建议催化剂再生时机: {half_life*0.8:.1f} min")
     
     print(f"2. 产物竞争关系:")
-    for product in main_products:
+    for product in all_products:
         if competition_results[product] is not None:
             result = competition_results[product]
             trend = "增强" if result['B'] > 0 else "减弱" if result['B'] < 0 else "稳定"
