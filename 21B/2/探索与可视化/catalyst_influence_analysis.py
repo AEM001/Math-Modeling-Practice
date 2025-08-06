@@ -193,8 +193,8 @@ class SingleFactorAnalyzer:
                 x = clean_data[factor_col].values
                 y = clean_data[target].values
                 
-                # 计算相关系数和p值
-                corr_coef, p_value = stats.pearsonr(x, y)
+                # 计算斯皮尔曼相关系数和p值
+                corr_coef, p_value = stats.spearmanr(x, y)
                 
                 # 计算关系强度d（Cohen's d或效应量）
                 # 这里使用相关系数的绝对值作为关系强度的度量
@@ -227,7 +227,7 @@ class SingleFactorAnalyzer:
                     '影响因素': factor_name,
                     '目标变量': target,
                     '样本数量': len(clean_data),
-                    '相关系数(ρ)': corr_coef,
+                    '斯皮尔曼相关系数(ρ)': corr_coef,
                     'p值': p_value,
                     '关系强度(d)': effect_size,
                     '非线性显著性(p_quad)': p_quad,
@@ -339,16 +339,16 @@ class ResultSummarizer:
         strongest_ethanol = ethanol_results.iloc[0]
         strongest_c4 = c4_results.iloc[0]
         
-        print(f"   a) 对乙醇转化率影响最强的因素是 {strongest_ethanol['影响因素']} (r={strongest_ethanol['相关系数(ρ)']:.4f})")
-        print(f"   b) 对C4烯烃选择性影响最强的因素是 {strongest_c4['影响因素']} (r={strongest_c4['相关系数(ρ)']:.4f})")
+        print(f"   a) 对乙醇转化率影响最强的因素是 {strongest_ethanol['影响因素']} (ρ={strongest_ethanol['斯皮尔曼相关系数(ρ)']:.4f})")
+        print(f"   b) 对C4烯烃选择性影响最强的因素是 {strongest_c4['影响因素']} (ρ={strongest_c4['斯皮尔曼相关系数(ρ)']:.4f})")
         
         # 温度的影响
         temp_ethanol = ethanol_results[ethanol_results['影响因素'] == '温度']
         temp_c4 = c4_results[c4_results['影响因素'] == '温度']
         
         if len(temp_ethanol) > 0 and len(temp_c4) > 0:
-            print(f"   c) 温度对乙醇转化率的影响: {temp_ethanol.iloc[0]['显著性评价']} (r={temp_ethanol.iloc[0]['相关系数(ρ)']:.4f})")
-            print(f"   d) 温度对C4烯烃选择性的影响: {temp_c4.iloc[0]['显著性评价']} (r={temp_c4.iloc[0]['相关系数(ρ)']:.4f})")
+            print(f"   c) 温度对乙醇转化率的影响: {temp_ethanol.iloc[0]['显著性评价']} (ρ={temp_ethanol.iloc[0]['斯皮尔曼相关系数(ρ)']:.4f})")
+            print(f"   d) 温度对C4烯烃选择性的影响: {temp_c4.iloc[0]['显著性评价']} (ρ={temp_c4.iloc[0]['斯皮尔曼相关系数(ρ)']:.4f})")
         
         print("\n" + "="*80)
         
@@ -368,7 +368,7 @@ class ResultSummarizer:
 
 ## 2. 分析方法
 - **可视化分析**: 温度箱线图（25°C分组）、Co负载量箱线图、装料比/乙醇浓度散点图
-- **定量分析**: 相关系数(ρ)、显著性检验(p值)、关系强度(d)、非线性检验(p_quad)
+- **定量分析**: 斯皮尔曼相关系数(ρ)、显著性检验(p值)、关系强度(d)、非线性检验(p_quad)
 
 ## 3. 主要发现
 
@@ -379,7 +379,7 @@ class ResultSummarizer:
         ethanol_results = ethanol_results.sort_values('关系强度(d)', ascending=False)
         
         for idx, row in ethanol_results.iterrows():
-            report += f"- **{row['影响因素']}**: r={row['相关系数(ρ)']:.4f}, {row['显著性评价']}, {row['关系强度评价']}\n"
+            report += f"- **{row['影响因素']}**: ρ={row['斯皮尔曼相关系数(ρ)']:.4f}, {row['显著性评价']}, {row['关系强度评价']}\n"
         
         report += "\n### 3.2 C4烯烃选择性影响因素排序\n"
         
@@ -387,7 +387,7 @@ class ResultSummarizer:
         c4_results = c4_results.sort_values('关系强度(d)', ascending=False)
         
         for idx, row in c4_results.iterrows():
-            report += f"- **{row['影响因素']}**: r={row['相关系数(ρ)']:.4f}, {row['显著性评价']}, {row['关系强度评价']}\n"
+            report += f"- **{row['影响因素']}**: ρ={row['斯皮尔曼相关系数(ρ)']:.4f}, {row['显著性评价']}, {row['关系强度评价']}\n"
         
         report += "\n### 3.3 非线性关系分析\n"
         
@@ -420,8 +420,8 @@ def main():
     
     # 1. 数据处理
     processor = CatalystDataProcessor(
-        data_path='../附件1.csv',
-        catalyst_info_path='每组指标.csv'
+        data_path='../../附件1.csv',
+        catalyst_info_path='../每组指标.csv'
     )
     processor.load_data()
     processor.process_data()
