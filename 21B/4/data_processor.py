@@ -118,16 +118,16 @@ class DataProcessor:
         clean_data = clean_data.dropna(subset=['C4_yield', 'T', 'total_mass', 'loading_ratio', 
                                               'Co_loading', 'ethanol_conc', 'loading_method'])
         
-        # 移除异常值 (使用IQR方法)
-        Q1 = clean_data['C4_yield'].quantile(0.25)
-        Q3 = clean_data['C4_yield'].quantile(0.75)
-        IQR = Q3 - Q1
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
+        # 修正：对于小数据集，IQR方法可能过于激进，暂时禁用以保留所有数据点
+        # Q1 = clean_data['C4_yield'].quantile(0.25)
+        # Q3 = clean_data['C4_yield'].quantile(0.75)
+        # IQR = Q3 - Q1
+        # lower_bound = Q1 - 1.5 * IQR
+        # upper_bound = Q3 + 1.5 * IQR
         
-        # 保留合理范围内的数据
-        clean_data = clean_data[(clean_data['C4_yield'] >= max(0, lower_bound)) & 
-                               (clean_data['C4_yield'] <= upper_bound)]
+        # # 保留合理范围内的数据
+        # clean_data = clean_data[(clean_data['C4_yield'] >= max(0, lower_bound)) & 
+        #                        (clean_data['C4_yield'] <= upper_bound)]
         
         return clean_data
     

@@ -22,11 +22,11 @@ from ei_optimizer import EIOptimizer
 # 设置中文字体
 import platform
 if platform.system() == 'Darwin':  # macOS
-    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Helvetica', 'DejaVu Sans']
+    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 elif platform.system() == 'Windows':
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+    plt.rcParams['font.sans-serif'] = ['SimHei'] # Windows
 else:  # Linux
-    plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'WenQuanYi Micro Hei']
+    plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei'] # Linux
 plt.rcParams['axes.unicode_minus'] = False
 
 class ExperimentDesigner:

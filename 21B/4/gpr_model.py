@@ -49,7 +49,7 @@ class GPRModel:
         print("  🏗️ 创建GPR模型...")
         self.model = GaussianProcessRegressor(
             kernel=kernel,
-            alpha=1e-6,  # 噪声水平
+            alpha=0.5,  # 修正：增加正则化项，对抗过拟合
             normalize_y=True,  # 标准化目标变量
             n_restarts_optimizer=10 if optimize_hyperparams else 0,
             random_state=self.random_state
