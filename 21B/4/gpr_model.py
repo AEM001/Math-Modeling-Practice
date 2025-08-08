@@ -17,6 +17,88 @@ from typing import Tuple, Dict, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
+# 更稳健的中文字体设置
+import platform, os
+from matplotlib import font_manager as fm
+
+def _set_chinese_font():
+    system = platform.system()
+    if system == 'Darwin':  # macOS 常见中文字体
+        candidates = ['PingFang SC', 'Hiragino Sans GB', 'Heiti SC', 'Songti SC', 'STHeiti', 'STSong', 'Arial Unicode MS']
+        font_dirs = [
+            '/System/Library/Fonts',
+            '/Library/Fonts',
+            os.path.expanduser('~/Library/Fonts')
+        ]
+        file_keywords = ['PingFang', 'Hiragino', 'Heiti', 'Songti', 'STHeiti', 'STSong']
+    elif system == 'Windows':
+        candidates = ['Microsoft YaHei', 'SimHei', 'SimSun', 'NSimSun']
+        font_dirs = [os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts')]
+        file_keywords = ['yahei', 'simhei', 'simsun']
+    else:  # Linux
+        candidates = ['Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'Source Han Sans SC', 'Droid Sans Fallback', 'DejaVu Sans']
+        font_dirs = ['/usr/share/fonts', '/usr/local/share/fonts', os.path.expanduser('~/.local/share/fonts')]
+        file_keywords = ['NotoSansCJK', 'WenQuanYi', 'SourceHanSans', 'DroidSansFallback']
+
+    # 1) 优先通过 family 名称严格查找
+    for name in candidates:
+        try:
+            path = fm.findfont(fm.FontProperties(family=name), fallback_to_default=False)
+            if path and os.path.exists(path):
+                plt.rcParams['font.family'] = 'sans-serif'
+                plt.rcParams['font.sans-serif'] = [name]
+                plt.rcParams['axes.unicode_minus'] = False
+                print(f'使用中文字体: {name} -> {path}')
+                return name
+        except Exception:
+            continue
+
+    # 2) 扫描系统字体目录，尝试动态注册（含 .ttf/.otf/.ttc）
+    try:
+        for d in font_dirs:
+            if not os.path.isdir(d):
+                continue
+            for fname in os.listdir(d):
+                lower = fname.lower()
+                if any(k.lower() in lower for k in file_keywords) and (lower.endswith('.ttf') or lower.endswith('.otf') or lower.endswith('.ttc')):
+                    fpath = os.path.join(d, fname)
+                    try:
+                        fm.fontManager.addfont(fpath)
+                    except Exception:
+                        # 某些 .ttc 可能无法直接 addfont，忽略错误继续
+                        pass
+        fm._rebuild()  # 刷新字体缓存
+        installed = {f.name for f in fm.fontManager.ttflist}
+        for name in candidates:
+            if name in installed:
+                plt.rcParams['font.family'] = 'sans-serif'
+                plt.rcParams['font.sans-serif'] = [name]
+                plt.rcParams['axes.unicode_minus'] = False
+                print(f'使用中文字体(动态注册): {name}')
+                return name
+    except Exception:
+        pass
+
+    # 3) 再次尝试宽松匹配任一已安装 CJK 字体
+    installed_fonts = [(f.name, getattr(f, 'fname', '')) for f in fm.fontManager.ttflist]
+    for fam, fpath in installed_fonts:
+        if any(k.lower() in fam.lower() for k in ['pingfang', 'hiragino', 'heiti', 'song', 'noto', 'source han', 'wqy', 'cjk', '汉', '黑体', '宋体']):
+            plt.rcParams['font.family'] = 'sans-serif'
+            plt.rcParams['font.sans-serif'] = [fam]
+            plt.rcParams['axes.unicode_minus'] = False
+            print(f'使用中文字体(宽松匹配): {fam} -> {fpath}')
+            return fam
+
+    # 4) 最后兜底
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
+    print('未找到合适中文字体，使用 DejaVu Sans 兜底（可能无法显示中文）')
+    return 'DejaVu Sans'
+
+# 模块导入时先设置一次
+_set_chinese_font()
+
 class GPRModel:
     """高斯过程回归模型类"""
     
@@ -39,14 +121,14 @@ class GPRModel:
         Returns:
             training_results: 训练结果字典
         """
-        print("🔄 开始构建GPR模型...")
+        print(" 开始构建GPR模型...")
         
         # 1. 定义核函数
-        print("  ⚙️ 配置核函数...")
+        print("   配置核函数...")
         kernel = self._build_kernel(X.shape[1])
         
         # 2. 创建GPR模型
-        print("  🏗️ 创建GPR模型...")
+        print("   创建GPR模型...")
         self.model = GaussianProcessRegressor(
             kernel=kernel,
             alpha=0.5,  # 修正：增加正则化项，对抗过拟合
@@ -56,12 +138,12 @@ class GPRModel:
         )
         
         # 3. 训练模型
-        print("  🎯 训练模型...")
+        print("   训练模型...")
         self.model.fit(X, y)
         self.is_fitted = True
         
         # 4. 模型验证
-        print("  ✅ 模型验证...")
+        print("   模型验证...")
         validation_results = self._validate_model(X, y)
         
         # 5. 整理训练结果
@@ -72,10 +154,10 @@ class GPRModel:
             'model_summary': self._get_model_summary(X, y)
         }
         
-        print(f"✅ GPR模型训练完成！")
-        print(f"   📊 交叉验证R²: {validation_results['cv_r2_mean']:.4f} (±{validation_results['cv_r2_std']:.4f})")
-        print(f"   📈 训练集R²: {validation_results['train_r2']:.4f}")
-        print(f"   🎯 对数边际似然: {self.model.log_marginal_likelihood_value_:.4f}")
+        print(f" GPR模型训练完成！")
+        print(f"    交叉验证R²: {validation_results['cv_r2_mean']:.4f} (±{validation_results['cv_r2_std']:.4f})")
+        print(f"    训练集R²: {validation_results['train_r2']:.4f}")
+        print(f"    对数边际似然: {self.model.log_marginal_likelihood_value_:.4f}")
         
         return training_results
     
@@ -118,14 +200,14 @@ class GPRModel:
                 results['cv_r2_mean'] = cv_scores.mean()
                 results['cv_r2_std'] = cv_scores.std()
                 results['cv_scores'] = cv_scores.tolist()
-                print("  ⚠️ 留一交叉验证出现数值问题，回退到5折交叉验证")
+                print("   留一交叉验证出现数值问题，回退到5折交叉验证")
         except:
             # 如果留一交叉验证失败，使用5折交叉验证
             cv_scores = cross_val_score(self.model, X, y, cv=5, scoring='r2')
             results['cv_r2_mean'] = cv_scores.mean()
             results['cv_r2_std'] = cv_scores.std()
             results['cv_scores'] = cv_scores.tolist()
-            print("  ⚠️ 留一交叉验证失败，使用5折交叉验证")
+            print("   留一交叉验证失败，使用5折交叉验证")
         
         # RMSE交叉验证
         try:
@@ -257,13 +339,14 @@ class GPRModel:
     def plot_validation_results(self, X: np.ndarray, y: np.ndarray, save_path: str = None):
         """绘制验证结果"""
         if not self.is_fitted:
-            print("❌ 模型尚未训练，无法绘制验证结果")
+            print(" 模型尚未训练，无法绘制验证结果")
             return
         
         # 预测
         y_pred, y_std = self.predict(X, return_std=True)
         
         # 创建图形
+        _set_chinese_font()
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         fig.suptitle('GPR模型验证结果', fontsize=16, fontweight='bold')
         
@@ -314,7 +397,7 @@ class GPRModel:
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            print(f"📊 验证结果图已保存: {save_path}")
+            print(f" 验证结果图已保存: {save_path}")
         
         plt.show()
     
@@ -330,13 +413,13 @@ class GPRModel:
         # 转换为DataFrame并保存
         info_df = pd.DataFrame([model_info])
         info_df.to_csv(filepath, index=False)
-        print(f"💾 模型信息已保存: {filepath}")
+        print(f" 模型信息已保存: {filepath}")
 
 def main():
     """测试GPR模型模块"""
     from data_processor import DataProcessor
     
-    print("🧪 测试GPR模型模块...")
+    print(" 测试GPR模型模块...")
     
     # 1. 加载数据
     processor = DataProcessor()
@@ -360,10 +443,10 @@ def main():
         # 5. 保存模型信息
         gpr.save_model_info('gpr_model_info.csv', training_results)
         
-        print("\n✅ GPR模型模块测试通过！")
+        print("\n GPR模型模块测试通过！")
         
     except Exception as e:
-        print(f"❌ 测试失败: {e}")
+        print(f" 测试失败: {e}")
         import traceback
         traceback.print_exc()
 

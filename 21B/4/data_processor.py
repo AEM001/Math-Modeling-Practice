@@ -34,41 +34,41 @@ class DataProcessor:
             y: 目标变量 (C4烯烃收率)
             data_info: 数据信息字典
         """
-        print("🔄 开始数据加载与预处理...")
+        print(" 开始数据加载与预处理...")
         
         # 1. 加载附件1数据
-        print("  📂 加载附件1数据...")
+        print("   加载附件1数据...")
         attachment1 = pd.read_csv(attachment1_path)
         
         # 2. 计算C4烯烃收率
-        print("  🧮 计算C4烯烃收率...")
+        print("   计算C4烯烃收率...")
         attachment1['C4_yield'] = (attachment1['乙醇转化率(%)'] * attachment1['C4烯烃选择性(%)']) / 100
         
         # 3. 加载并清洗每组指标数据
-        print("  📂 加载每组指标数据...")
+        print("   加载每组指标数据...")
         indicators = pd.read_csv(indicators_path)
         indicators_cleaned = self._clean_indicators_data(indicators)
         
         # 4. 合并数据
-        print("  🔗 合并数据表...")
+        print("   合并数据表...")
         merged_data = pd.merge(attachment1, indicators_cleaned, on='催化剂组合编号', how='left')
         
         # 5. 特征工程
-        print("  ⚙️ 进行特征工程...")
+        print("   进行特征工程...")
         processed_data = self._feature_engineering(merged_data)
         
         # 6. 数据清洗和验证
-        print("  🧹 数据清洗...")
+        print("   数据清洗...")
         clean_data = self._clean_data(processed_data)
         
         # 7. 准备训练数据
-        print("  📊 准备训练数据...")
+        print("   准备训练数据...")
         X, y, data_info = self._prepare_training_data(clean_data)
         
-        print(f"✅ 数据预处理完成！")
-        print(f"   📈 样本数量: {len(X)}")
-        print(f"   📋 特征维度: {X.shape[1]}")
-        print(f"   🎯 收率范围: {y.min():.4f} - {y.max():.4f}")
+        print(f" 数据预处理完成！")
+        print(f"    样本数量: {len(X)}")
+        print(f"    特征维度: {X.shape[1]}")
+        print(f"    收率范围: {y.min():.4f} - {y.max():.4f}")
         
         return X, y, data_info
     
@@ -208,23 +208,23 @@ def main():
     try:
         X, y, data_info = processor.load_and_prepare_data('附件1.csv', '每组指标.csv')
         
-        print("\n📊 数据信息:")
+        print("\n 数据信息:")
         print(f"特征名称: {data_info['feature_names']}")
         print(f"样本数量: {data_info['n_samples']}")
         print(f"特征维度: {data_info['n_features']}")
         print(f"目标变量统计: {data_info['target_stats']}")
         
-        print("\n📏 特征范围:")
+        print("\n 特征范围:")
         for feature, range_info in data_info['feature_ranges'].items():
             if range_info['type'] == 'continuous':
                 print(f"  {feature}: {range_info['min']:.2f} - {range_info['max']:.2f}")
             else:
                 print(f"  {feature}: {range_info['values']}")
         
-        print("\n✅ 数据处理模块测试通过！")
+        print("\n 数据处理模块测试通过！")
         
     except Exception as e:
-        print(f"❌ 测试失败: {e}")
+        print(f" 测试失败: {e}")
 
 if __name__ == "__main__":
     main()

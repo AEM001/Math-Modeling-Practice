@@ -36,7 +36,7 @@ class EIOptimizer:
         Returns:
             ei_values: EI值数组
         """
-        print(f"🔄 计算{len(X)}个候选点的EI值...")
+        print(f" 计算{len(X)}个候选点的EI值...")
         
         # 获取GPR预测
         mu, sigma = gpr_model.predict(X, return_std=True)
@@ -56,9 +56,9 @@ class EIOptimizer:
         # 处理数值异常
         ei_values = np.maximum(ei_values, 0)
         
-        print(f"✅ EI计算完成")
-        print(f"   📊 EI值范围: [{ei_values.min():.6f}, {ei_values.max():.6f}]")
-        print(f"   📈 平均EI值: {ei_values.mean():.6f}")
+        print(f" EI计算完成")
+        print(f"    EI值范围: [{ei_values.min():.6f}, {ei_values.max():.6f}]")
+        print(f"    平均EI值: {ei_values.mean():.6f}")
         
         return ei_values
     
@@ -82,13 +82,13 @@ class EIOptimizer:
         if constraints is None:
             return ei_values
         
-        print("🔒 应用约束条件...")
+        print(" 应用约束条件...")
         
         # 应用约束惩罚
         penalty_factors = self._calculate_constraint_penalties(X, constraints)
         constrained_ei = ei_values * penalty_factors
         
-        print(f"   📉 约束后EI值范围: [{constrained_ei.min():.6f}, {constrained_ei.max():.6f}]")
+        print(f"    约束后EI值范围: [{constrained_ei.min():.6f}, {constrained_ei.max():.6f}]")
         
         return constrained_ei
     
@@ -156,7 +156,7 @@ class EIOptimizer:
             selected_points: 选中的实验点
             selection_info: 选择信息
         """
-        print(f"🎯 选择{n_experiments}个最优实验点...")
+        print(f" 选择{n_experiments}个最优实验点...")
         
         selected_indices = []
         remaining_indices = np.arange(len(X))
@@ -168,7 +168,7 @@ class EIOptimizer:
         }
         
         for i in range(n_experiments):
-            print(f"  🔍 选择第{i+1}个实验点...")
+            print(f"   选择第{i+1}个实验点...")
             
             if i == 0:
                 # 第一个点：选择EI值最高的
@@ -202,12 +202,12 @@ class EIOptimizer:
             selected_indices.append(selected_idx)
             remaining_indices = np.delete(remaining_indices, best_idx)
             
-            print(f"    ✅ 选中点{selected_idx}: EI={ei_values[selected_idx]:.6f}, "
+            print(f"     选中点{selected_idx}: EI={ei_values[selected_idx]:.6f}, "
                   f"预测收率={mu[0]:.4f}±{sigma[0]:.4f}")
         
         selected_points = X[selected_indices]
         
-        print(f"🎉 实验点选择完成！")
+        print(f" 实验点选择完成！")
         
         return np.array(selected_indices), selected_points, selection_info
     
@@ -249,7 +249,7 @@ class EIOptimizer:
     def analyze_selection_results(self, selected_points: np.ndarray, selection_info: Dict,
                                 feature_names: List[str]) -> pd.DataFrame:
         """分析选择结果"""
-        print("📊 分析实验点选择结果...")
+        print(" 分析实验点选择结果...")
         
         # 创建结果DataFrame
         results_df = pd.DataFrame(selected_points, columns=feature_names)
@@ -263,7 +263,7 @@ class EIOptimizer:
             results_df, feature_names
         )
         
-        print("✅ 结果分析完成")
+        print(" 结果分析完成")
         
         return results_df
     
@@ -307,11 +307,11 @@ class EIOptimizer:
     def save_results(self, results_df: pd.DataFrame, filepath: str):
         """保存选择结果"""
         results_df.to_csv(filepath, index=False, encoding='utf-8-sig')
-        print(f"💾 实验设计结果已保存: {filepath}")
+        print(f" 实验设计结果已保存: {filepath}")
 
 def main():
     """测试EI优化模块"""
-    print("🧪 测试EI优化模块...")
+    print(" 测试EI优化模块...")
     
     try:
         # 创建测试数据
@@ -358,16 +358,16 @@ def main():
             selected_points, selection_info, feature_names
         )
         
-        print("\n📊 选择结果:")
+        print("\n 选择结果:")
         print(results_df)
         
         # 保存结果
         optimizer.save_results(results_df, 'test_experiment_design.csv')
         
-        print("\n✅ EI优化模块测试通过！")
+        print("\n EI优化模块测试通过！")
         
     except Exception as e:
-        print(f"❌ 测试失败: {e}")
+        print(f" 测试失败: {e}")
         import traceback
         traceback.print_exc()
 

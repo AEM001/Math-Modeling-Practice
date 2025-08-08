@@ -63,34 +63,34 @@ class CandidateGenerator:
             candidates_scaled: 标准化后的候选点
             candidates_original: 原始尺度的候选点
         """
-        print(f"🔄 生成{n_candidates}个候选实验点...")
+        print(f" 生成{n_candidates}个候选实验点...")
         
         # 1. 分离连续变量和离散变量
         continuous_vars, discrete_vars = self._separate_variables(variable_bounds)
         
         # 2. 生成连续变量的LHS采样
-        print("  📊 连续变量LHS采样...")
+        print("   连续变量LHS采样...")
         continuous_samples = self._generate_continuous_samples(continuous_vars, n_candidates)
         
         # 3. 生成离散变量的随机采样
-        print("  🎲 离散变量随机采样...")
+        print("   离散变量随机采样...")
         discrete_samples = self._generate_discrete_samples(discrete_vars, n_candidates)
         
         # 4. 合并候选点
-        print("  🔗 合并候选点...")
+        print("   合并候选点...")
         candidates_original = self._combine_samples(continuous_samples, discrete_samples, 
                                                    continuous_vars, discrete_vars)
         
         # 5. 标准化候选点
         if scaler is not None:
-            print("  📏 标准化候选点...")
+            print("   标准化候选点...")
             candidates_scaled = scaler.transform(candidates_original)
         else:
             candidates_scaled = candidates_original.copy()
         
-        print(f"✅ 候选点生成完成！")
-        print(f"   📈 候选点数量: {len(candidates_original)}")
-        print(f"   📋 特征维度: {candidates_original.shape[1]}")
+        print(f" 候选点生成完成！")
+        print(f"    候选点数量: {len(candidates_original)}")
+        print(f"    特征维度: {candidates_original.shape[1]}")
         
         return candidates_scaled, candidates_original
     
@@ -179,7 +179,7 @@ class CandidateGenerator:
             candidates_scaled: 标准化后的候选点
             candidates_original: 原始尺度的候选点
         """
-        print("🔄 生成网格候选点...")
+        print(" 生成网格候选点...")
         
         # 定义网格点
         grid_points = {}
@@ -215,8 +215,8 @@ class CandidateGenerator:
         else:
             candidates_scaled = candidates_original.copy()
         
-        print(f"✅ 网格候选点生成完成！")
-        print(f"   📈 候选点数量: {len(candidates_original)}")
+        print(f" 网格候选点生成完成！")
+        print(f"    候选点数量: {len(candidates_original)}")
         
         return candidates_scaled, candidates_original
     
@@ -272,7 +272,7 @@ class CandidateGenerator:
                 feasible_mask[i] = False
                 continue
         
-        print(f"🔍 可行性过滤完成: {feasible_mask.sum()}/{len(feasible_mask)} 点可行")
+        print(f" 可行性过滤完成: {feasible_mask.sum()}/{len(feasible_mask)} 点可行")
         
         return feasible_mask
     
@@ -282,20 +282,20 @@ class CandidateGenerator:
         
         df = pd.DataFrame(candidates_original, columns=feature_names)
         df.to_csv(filepath, index=False)
-        print(f"💾 候选点已保存: {filepath}")
+        print(f" 候选点已保存: {filepath}")
 
 def main():
     """测试候选点生成模块"""
     from data_processor import DataProcessor
     
-    print("🧪 测试候选点生成模块...")
+    print(" 测试候选点生成模块...")
     
     try:
         # 1. 获取变量边界
         processor = DataProcessor()
         variable_bounds = processor.get_variable_bounds()
         
-        print("📏 变量边界:")
+        print(" 变量边界:")
         for var, bounds in variable_bounds.items():
             print(f"  {var}: {bounds}")
         
@@ -314,7 +314,7 @@ def main():
         feasible_mask = generator.filter_feasible_candidates(candidates_original)
         feasible_candidates = candidates_original[feasible_mask]
         
-        print(f"\n📊 候选点统计:")
+        print(f"\n 候选点统计:")
         print(f"LHS候选点: {len(candidates_original)}")
         print(f"网格候选点: {len(grid_original)}")
         print(f"可行LHS候选点: {len(feasible_candidates)}")
@@ -323,10 +323,10 @@ def main():
         generator.save_candidates(feasible_candidates, 'feasible_candidates.csv')
         generator.save_candidates(grid_original, 'grid_candidates.csv')
         
-        print("\n✅ 候选点生成模块测试通过！")
+        print("\n 候选点生成模块测试通过！")
         
     except Exception as e:
-        print(f"❌ 测试失败: {e}")
+        print(f" 测试失败: {e}")
         import traceback
         traceback.print_exc()
 

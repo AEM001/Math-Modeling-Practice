@@ -19,15 +19,87 @@ from gpr_model import GPRModel
 from candidate_generator import CandidateGenerator
 from ei_optimizer import EIOptimizer
 
-# 设置中文字体
-import platform
-if platform.system() == 'Darwin':  # macOS
-    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
-elif platform.system() == 'Windows':
-    plt.rcParams['font.sans-serif'] = ['SimHei'] # Windows
-else:  # Linux
-    plt.rcParams['font.sans-serif'] = ['WenQuanYi Micro Hei'] # Linux
-plt.rcParams['axes.unicode_minus'] = False
+# 更稳健的中文字体设置
+import platform, os
+from matplotlib import font_manager as fm
+
+def _set_chinese_font():
+    system = platform.system()
+    if system == 'Darwin':  # macOS 常见中文字体
+        candidates = ['PingFang SC', 'Hiragino Sans GB', 'Heiti SC', 'Songti SC', 'STHeiti', 'STSong', 'Arial Unicode MS']
+        font_dirs = [
+            '/System/Library/Fonts',
+            '/Library/Fonts',
+            os.path.expanduser('~/Library/Fonts')
+        ]
+        file_keywords = ['PingFang', 'Hiragino', 'Heiti', 'Songti', 'STHeiti', 'STSong']
+    elif system == 'Windows':
+        candidates = ['Microsoft YaHei', 'SimHei', 'SimSun', 'NSimSun']
+        font_dirs = [os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts')]
+        file_keywords = ['yahei', 'simhei', 'simsun']
+    else:  # Linux
+        candidates = ['Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'Source Han Sans SC', 'Droid Sans Fallback', 'DejaVu Sans']
+        font_dirs = ['/usr/share/fonts', '/usr/local/share/fonts', os.path.expanduser('~/.local/share/fonts')]
+        file_keywords = ['NotoSansCJK', 'WenQuanYi', 'SourceHanSans', 'DroidSansFallback']
+
+    # 1) 优先通过 family 名称严格查找
+    for name in candidates:
+        try:
+            path = fm.findfont(fm.FontProperties(family=name), fallback_to_default=False)
+            if path and os.path.exists(path):
+                plt.rcParams['font.family'] = 'sans-serif'
+                plt.rcParams['font.sans-serif'] = [name]
+                plt.rcParams['axes.unicode_minus'] = False
+                print(f'使用中文字体: {name} -> {path}')
+                return name
+        except Exception:
+            continue
+
+    # 2) 扫描系统字体目录，尝试动态注册（含 .ttf/.otf/.ttc）
+    try:
+        for d in font_dirs:
+            if not os.path.isdir(d):
+                continue
+            for fname in os.listdir(d):
+                lower = fname.lower()
+                if any(k.lower() in lower for k in file_keywords) and (lower.endswith('.ttf') or lower.endswith('.otf') or lower.endswith('.ttc')):
+                    fpath = os.path.join(d, fname)
+                    try:
+                        fm.fontManager.addfont(fpath)
+                    except Exception:
+                        # 某些 .ttc 可能无法直接 addfont，忽略错误继续
+                        pass
+        fm._rebuild()  # 刷新字体缓存
+        installed = {f.name for f in fm.fontManager.ttflist}
+        for name in candidates:
+            if name in installed:
+                plt.rcParams['font.family'] = 'sans-serif'
+                plt.rcParams['font.sans-serif'] = [name]
+                plt.rcParams['axes.unicode_minus'] = False
+                print(f'使用中文字体(动态注册): {name}')
+                return name
+    except Exception:
+        pass
+
+    # 3) 再次尝试宽松匹配任一已安装 CJK 字体
+    installed_fonts = [(f.name, getattr(f, 'fname', '')) for f in fm.fontManager.ttflist]
+    for fam, fpath in installed_fonts:
+        if any(k.lower() in fam.lower() for k in ['pingfang', 'hiragino', 'heiti', 'song', 'noto', 'source han', 'wqy', 'cjk', '汉', '黑体', '宋体']):
+            plt.rcParams['font.family'] = 'sans-serif'
+            plt.rcParams['font.sans-serif'] = [fam]
+            plt.rcParams['axes.unicode_minus'] = False
+            print(f'使用中文字体(宽松匹配): {fam} -> {fpath}')
+            return fam
+
+    # 4) 最后兜底
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
+    print('未找到合适中文字体，使用 DejaVu Sans 兜底（可能无法显示中文）')
+    return 'DejaVu Sans'
+
+# 模块导入时先设置一次
+_set_chinese_font()
 
 class ExperimentDesigner:
     """实验设计器主类"""
@@ -66,7 +138,7 @@ class ExperimentDesigner:
             X_train: 训练特征矩阵
             y_train: 训练目标向量
         """
-        print("🔄 步骤1: 数据加载与预处理...")
+        print(" 步骤1: 数据加载与预处理...")
         
         # 加载和预处理数据
         self.X_train, self.y_train, data_info = self.data_processor.load_and_prepare_data(data_path, catalyst_path)
@@ -80,16 +152,16 @@ class ExperimentDesigner:
         # 记录当前最佳收率
         self.y_best = np.max(self.y_train)
         
-        print(f"✅ 数据处理完成!")
-        print(f"   📊 训练样本数: {len(self.X_train)}")
-        print(f"   📋 特征维度: {self.X_train.shape[1]}")
-        print(f"   🎯 当前最佳收率: {self.y_best:.4f}")
+        print(f" 数据处理完成!")
+        print(f"    训练样本数: {len(self.X_train)}")
+        print(f"    特征维度: {self.X_train.shape[1]}")
+        print(f"    当前最佳收率: {self.y_best:.4f}")
         
         return self.X_train, self.y_train
     
     def build_gpr_model(self) -> None:
         """构建和训练GPR模型"""
-        print("\n🔄 步骤2: GPR模型构建与训练...")
+        print("\n 步骤2: GPR模型构建与训练...")
         
         # 训练模型
         training_results = self.gpr_model.build_and_train(self.X_train, self.y_train)
@@ -98,9 +170,9 @@ class ExperimentDesigner:
         # 获取验证结果
         validation_results = training_results['validation_results']
         
-        print(f"✅ GPR模型训练完成!")
-        print(f"   📈 交叉验证R²: {validation_results['cv_r2_mean']:.4f} ± {validation_results['cv_r2_std']:.4f}")
-        print(f"   📉 交叉验证RMSE: {validation_results['cv_rmse_mean']:.4f} ± {validation_results['cv_rmse_std']:.4f}")
+        print(f" GPR模型训练完成!")
+        print(f"    交叉验证R²: {validation_results['cv_r2_mean']:.4f} ± {validation_results['cv_r2_std']:.4f}")
+        print(f"    交叉验证RMSE: {validation_results['cv_rmse_mean']:.4f} ± {validation_results['cv_rmse_std']:.4f}")
     
     def generate_candidate_points(self, n_candidates: int = 1000, 
                                 use_grid: bool = False) -> Tuple[np.ndarray, np.ndarray]:
@@ -115,7 +187,7 @@ class ExperimentDesigner:
             candidates_scaled: 标准化候选点
             candidates_original: 原始候选点
         """
-        print(f"\n🔄 步骤3: 候选点生成...")
+        print(f"\n 步骤3: 候选点生成...")
         
         if use_grid:
             # 网格采样
@@ -138,8 +210,8 @@ class ExperimentDesigner:
         self.candidates_scaled = self.candidates_scaled[feasible_mask]
         self.candidates_original = self.candidates_original[feasible_mask]
         
-        print(f"✅ 候选点生成完成!")
-        print(f"   📊 可行候选点数: {len(self.candidates_original)}")
+        print(f" 候选点生成完成!")
+        print(f"    可行候选点数: {len(self.candidates_original)}")
         
         return self.candidates_scaled, self.candidates_original
     
@@ -157,7 +229,7 @@ class ExperimentDesigner:
         Returns:
             results_df: 实验设计结果
         """
-        print(f"\n🔄 步骤4: 实验设计优化...")
+        print(f"\n 步骤4: 实验设计优化...")
         
         # 计算EI值
         if use_constraints:
@@ -194,13 +266,13 @@ class ExperimentDesigner:
         # 添加实验编号
         results_df.insert(0, 'experiment_id', [f'NEW_{i+1}' for i in range(len(results_df))])
         
-        print(f"✅ 实验设计优化完成!")
+        print(f" 实验设计优化完成!")
         
         return results_df
     
     def generate_detailed_recommendations(self, results_df: pd.DataFrame) -> pd.DataFrame:
         """生成详细的实验建议"""
-        print("\n🔄 步骤5: 生成详细实验建议...")
+        print("\n 步骤5: 生成详细实验建议...")
         
         # 创建详细建议DataFrame
         detailed_df = results_df.copy()
@@ -245,7 +317,7 @@ class ExperimentDesigner:
             axis=1
         )
         
-        print("✅ 详细实验建议生成完成!")
+        print(" 详细实验建议生成完成!")
         
         return detailed_df
     
@@ -298,11 +370,12 @@ class ExperimentDesigner:
     
     def visualize_results(self, results_df: pd.DataFrame, save_plots: bool = True):
         """可视化结果"""
-        print("\n🔄 步骤6: 结果可视化...")
+        print("\n 步骤6: 结果可视化...")
         
-        # 设置图形样式
+        # 设置图形样式（注意：style.use 可能会重置字体设置）
         plt.style.use('default')
-        # 确保中文字体正确显示
+        # 重新设置中文字体，避免样式重置导致中文丢失
+        _set_chinese_font()
         plt.rcParams['font.size'] = 10
         fig = plt.figure(figsize=(20, 15))
         
@@ -360,29 +433,29 @@ class ExperimentDesigner:
         
         if save_plots:
             plt.savefig('experiment_design_analysis.png', dpi=300, bbox_inches='tight')
-            print("📊 可视化图表已保存: experiment_design_analysis.png")
+            print(" 可视化图表已保存: experiment_design_analysis.png")
         
         plt.show()
         
-        print("✅ 结果可视化完成!")
+        print(" 结果可视化完成!")
     
     def save_results(self, results_df: pd.DataFrame, detailed_df: pd.DataFrame = None):
         """保存结果"""
-        print("\n🔄 步骤7: 保存结果...")
+        print("\n 步骤7: 保存结果...")
         
         # 保存基础结果
         results_df.to_csv('experiment_design_results.csv', index=False, encoding='utf-8-sig')
-        print("💾 基础结果已保存: experiment_design_results.csv")
+        print(" 基础结果已保存: experiment_design_results.csv")
         
         # 保存详细建议
         if detailed_df is not None:
             detailed_df.to_csv('detailed_experiment_recommendations.csv', index=False, encoding='utf-8-sig')
-            print("💾 详细建议已保存: detailed_experiment_recommendations.csv")
+            print(" 详细建议已保存: detailed_experiment_recommendations.csv")
         
         # 生成实验报告
         self._generate_experiment_report(results_df, detailed_df)
         
-        print("✅ 结果保存完成!")
+        print(" 结果保存完成!")
     
     def _generate_experiment_report(self, results_df: pd.DataFrame, detailed_df: pd.DataFrame = None):
         """生成实验报告"""
@@ -423,7 +496,7 @@ class ExperimentDesigner:
         with open('experiment_design_report.md', 'w', encoding='utf-8') as f:
             f.write('\n'.join(report_content))
         
-        print("📋 实验报告已保存: experiment_design_report.md")
+        print(" 实验报告已保存: experiment_design_report.md")
     
     def run_complete_design(self, n_experiments: int = 5, n_candidates: int = 1000,
                           use_constraints: bool = True, diversity_weight: float = 0.3,
@@ -442,7 +515,7 @@ class ExperimentDesigner:
             results_df: 基础结果
             detailed_df: 详细建议
         """
-        print("🚀 开始完整实验设计流程...\n")
+        print(" 开始完整实验设计流程...\n")
         
         try:
             # 1. 数据处理
@@ -466,8 +539,8 @@ class ExperimentDesigner:
             # 7. 保存结果
             self.save_results(results_df, detailed_df)
             
-            print("\n🎉 实验设计流程完成!")
-            print("📋 请查看生成的文件:")
+            print("\n 实验设计流程完成!")
+            print(" 请查看生成的文件:")
             print("   - experiment_design_results.csv: 基础结果")
             print("   - detailed_experiment_recommendations.csv: 详细建议")
             print("   - experiment_design_report.md: 实验报告")
@@ -477,14 +550,14 @@ class ExperimentDesigner:
             return results_df, detailed_df
             
         except Exception as e:
-            print(f"❌ 实验设计流程失败: {e}")
+            print(f" 实验设计流程失败: {e}")
             import traceback
             traceback.print_exc()
             return None, None
 
 def main():
     """主函数"""
-    print("🧪 乙醇偶合制备C4烯烃 - 实验设计系统")
+    print(" 乙醇偶合制备C4烯烃 - 实验设计系统")
     print("=" * 50)
     
     # 创建实验设计器
@@ -500,7 +573,7 @@ def main():
     )
     
     if results_df is not None:
-        print("\n📊 实验设计结果预览:")
+        print("\n 实验设计结果预览:")
         print(results_df[['experiment_id', 'T', 'Co_loading', 'predicted_yield', 'EI_value']].to_string(index=False))
 
 if __name__ == "__main__":
