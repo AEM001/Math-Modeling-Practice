@@ -62,13 +62,20 @@
 | 精细 | [-3, 3] | 11 | 精细搜索 |
 | 增强 | [-0.5, 0.5] | 5 | 非常保守的正则化 |
 
-#### 3.3 智能样条调整
-根据特征重要性动态调整样条数量：
+#### 3.3 智能样条调整（v1.1 修正版）
+根据特征重要性动态调整样条数量。该算法确保重要特征获得更复杂的样条函数，而不重要特征则使用简单样条，从而优化模型性能和泛化能力。
+
+**v1.1修正后的核心逻辑**：
 ```python
+# 定义最小和最大样条数
+min_splines = 3
+max_splines = params['n_splines'] # 来自配置，如3, 5, 8
+
+# 基于重要性得分（0到1之间），将样条数线性映射到[min_splines, max_splines]区间
 feature_importance = self._get_feature_importance_estimate(i, target_name)
-adjusted_splines = max(3, min(params['n_splines'], 
-                            int(params['n_splines'] * (1 + feature_importance))))
+adjusted_splines = int(round(min_splines + (max_splines - min_splines) * feature_importance))
 ```
+这个修正解决了v1.0版本中因算法问题导致所有特征样条数相同的缺陷。
 
 ### 4. 评分策略
 
@@ -207,6 +214,11 @@ composite_score = test_score - cv_std - overfitting_penalty + stability_bonus - 
 - **综合评分**：考虑多个维度的性能指标
 - **过拟合惩罚**：有效防止模型过拟合
 - **复杂度惩罚**：偏好简单、可解释的模型
+
+#### 1.4 算法修正（v1.1）
+- **问题识别**：在v1.0版本中，“智能样条调整”逻辑存在缺陷。由于特征重要性得分在归一化和整数转换后，未能产生差异化的样条数量，导致所有特征实际使用了相同的样条配置。
+- **算法修正**：v1.1版本采用了新的线性映射公式，将归一化后的特征重要性（0到1）有效映射到预设的最小和最大样条数之间。这确保了模型可以为更重要的特征分配更多资源（样条数），从而更精确地捕捉其非线性关系。
+- **预期效果**：修正后的模型能够更智能地分配复杂度，有望在保持泛化能力的同时提升预测精度。
 
 ### 2. 关键参数影响
 

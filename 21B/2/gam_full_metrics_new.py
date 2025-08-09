@@ -144,7 +144,8 @@ class GAMAnalyzer:
         print("步骤3: GAM模型构建")
         print("=" * 60)
         
-        # 简化的配置选项
+        log_content = []
+
         gam_configs = {
             '极简': {'n_splines': 3, 'spline_order': 2},
             '简单': {'n_splines': 5, 'spline_order': 3},
@@ -152,10 +153,10 @@ class GAMAnalyzer:
         }
         
         lam_ranges = {
-            '保守': np.logspace(-1, 1, 7),      # 更保守的正则化
-            '标准': np.logspace(-2, 2, 9),      # 标准配置
-            '精细': np.logspace(-3, 3, 11),     # 精细搜索
-            '增强': np.logspace(-0.5, 0.5, 5)   # 新增：非常保守的正则化
+            '保守': np.logspace(-1, 1, 7),
+            '标准': np.logspace(-2, 2, 9),
+            '精细': np.logspace(-3, 3, 11),
+            '增强': np.logspace(-0.5, 0.5, 5)
         }
         
         results = {}
@@ -163,6 +164,7 @@ class GAMAnalyzer:
         for target_name, y_train, y_test in [('转化率', self.y_train_conversion, self.y_test_conversion),
                                             ('选择性', self.y_train_selectivity, self.y_test_selectivity)]:
             
+            log_content.append("\n" + "="*50 + "\n模型目标: " + target_name + "\n" + "="*50)
             print(f"\n3.{1 if target_name == '转化率' else 2} {target_name}模型构建...")
             
             best_score = -np.inf
@@ -172,21 +174,27 @@ class GAMAnalyzer:
             
             for config_name, params in gam_configs.items():
                 for lam_name, lam_range in lam_ranges.items():
+                    log_content.append(f"\n--- 配置: {config_name}+{lam_name} ---")
                     try:
-                        # 构建模型项
                         continuous_terms = []
+                        spline_details = []
                         for i in range(len(self.feature_names) - 1):
                             feature_importance = self._get_feature_importance_estimate(i, target_name)
-                            adjusted_splines = max(3, min(params['n_splines'], 
-                                                        int(params['n_splines'] * (1 + feature_importance))))
+                            min_splines = 3
+                            max_splines = params['n_splines']
+                            adjusted_splines = int(round(min_splines + (max_splines - min_splines) * feature_importance))
+                            adjusted_splines = max(adjusted_splines, params['spline_order'] + 1)
+                            
+                            spline_details.append(f"  - {self.feature_names[i]}: {adjusted_splines}样条 (重要性: {feature_importance:.3f})")
                             continuous_terms.append(s(i, n_splines=adjusted_splines, spline_order=params['spline_order']))
                         
+                        log_content.extend(spline_details)
+
                         categorical_term = [f(len(self.feature_names) - 1)]
                         all_terms = continuous_terms + categorical_term
                         model_terms = reduce(operator.add, all_terms)
                         gam = LinearGAM(model_terms)
                         
-                        # 网格搜索
                         gam.gridsearch(self.X_train, y_train, lam=lam_range)
                         
                         train_score = gam.score(self.X_train, y_train)
@@ -196,13 +204,14 @@ class GAMAnalyzer:
                         cv_mean = np.mean(cv_scores)
                         cv_std = np.std(cv_scores)
                         
-                        # 综合评分（适应留一法）
                         overfitting_penalty = max(0, train_score - test_score - 0.1) * 2
-                        stability_bonus = max(0, 0.3 - cv_std) * 0.8  # 增强稳定性奖励
-                        complexity_penalty = len(continuous_terms) * 0.015  # 增强复杂度惩罚
-                        cv_performance_bonus = max(0, cv_mean) * 0.5  # 新增：CV性能奖励
+                        stability_bonus = max(0, 0.3 - cv_std) * 0.8
+                        complexity_penalty = len(continuous_terms) * 0.015
+                        cv_performance_bonus = max(0, cv_mean) * 0.5
                         composite_score = test_score - cv_std - overfitting_penalty + stability_bonus - complexity_penalty + cv_performance_bonus
                         
+                        score_log = f"  >> 综合得分: {composite_score:.3f} (测试R²={test_score:.3f}, CV={cv_mean:.3f}±{cv_std:.3f})"
+                        log_content.append(score_log)
                         print(f"  {config_name}+{lam_name}: 训练R²={train_score:.3f}, 测试R²={test_score:.3f}, "
                               f"CV={cv_mean:.3f}±{cv_std:.3f}, 综合={composite_score:.3f}")
                         
@@ -213,16 +222,17 @@ class GAMAnalyzer:
                             best_lam_range = lam_name
                             
                     except Exception as e:
-                        print(f"  {config_name}+{lam_name}: 构建失败 ({e})")
+                        error_msg = f"  构建失败 ({e})"
+                        log_content.append(error_msg)
+                        print(error_msg)
             
+            log_content.append(f"\n*** 最佳{target_name}模型: {best_config}+{best_lam_range} (综合得分: {best_score:.3f}) ***")
             print(f"  ✓ 最佳{target_name}模型: {best_config}+{best_lam_range}")
             
-            # 如果没有找到最佳模型，选择第一个成功的模型
             if best_model is None:
                 print(f"  ⚠ 未找到最佳模型，使用默认配置")
                 best_config = '极简'
                 best_lam_range = '标准'
-                # 重新构建默认模型
                 continuous_terms = []
                 for i in range(len(self.feature_names) - 1):
                     continuous_terms.append(s(i, n_splines=3, spline_order=2))
@@ -240,6 +250,9 @@ class GAMAnalyzer:
                 'best_lam_range': best_lam_range,
                 'model': best_model
             }
+        
+        with open('gam_model_configurations.txt', 'w', encoding='utf-8') as log_file:
+            log_file.write("\n".join(log_content))
         
         return results
     
