@@ -1,27 +1,7 @@
 响应面模型 (RidgeCV) 方程:
 ==================================================
 Y 代表预测的C4烯烃收率。
-所有特征（T, total_mass等）在代入方程前都经过了标准化处理。
+所有特征（T, total_mass等）在代入方程前都经过了归一化处理 (Min-Max Scaling)。
 ==================================================
 
-Y = 1.9920 \
-    + 3.6755 * (T) \
-    + 1.1655 * (total_mass) \
-    + 0.0000 * (loading_ratio) \
-    + 0.0000 * (C) \
-    - 0.9339 * (C_e) \
-    + 2.5954 * (T^2) \
-    + 1.6729 * (T total_mass) \
-    + 0.0000 * (T loading_ratio) \
-    + 0.0000 * (T C) \
-    - 0.6481 * (T C_e) \
-    - 0.9284 * (total_mass^2) \
-    + 0.0000 * (total_mass loading_ratio) \
-    + 0.0000 * (total_mass C) \
-    - 0.1839 * (total_mass C_e) \
-    + 0.0000 * (loading_ratio^2) \
-    + 0.0000 * (loading_ratio C) \
-    + 0.0000 * (loading_ratio C_e) \
-    + 0.0000 * (C^2) \
-    + 0.0000 * (C C_e) \
-    - 0.0921 * (C_e^2)
+Y = 0.4214     - 5.5628 * (T)     + 2.9161 * (total_mass)     + 0.0000 * (loading_ratio)     + 0.0000 * (C)     - 0.6631 * (C_e)     + 17.7741 * (T^2)     + 11.6939 * (T total_mass)     + 0.0000 * (T loading_ratio)     + 0.0000 * (T C)     - 7.2555 * (T C_e)     - 4.9327 * (total_mass^2)     + 0.0000 * (total_mass loading_ratio)     + 0.0000 * (total_mass C)     + 0.9435 * (total_mass C_e)     + 0.0000 * (loading_ratio^2)     + 0.0000 * (loading_ratio C)     + 0.0000 * (loading_ratio C_e)     + 0.0000 * (C^2)     + 0.0000 * (C C_e)     + 0.0890 * (C_e^2)

@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.preprocessing import MinMaxScaler, PolynomialFeatures
 from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import r2_score, mean_squared_error
@@ -11,7 +11,7 @@ def build_and_train_rsm(dataframe):
     
     功能：
     1. 分离自变量和目标变量
-    2. 数据标准化
+    2. 数据归一化
     3. 生成多项式特征
     4. 使用RidgeCV进行正则化回归拟合
     5. 模型评估
@@ -20,7 +20,7 @@ def build_and_train_rsm(dataframe):
         dataframe: 预处理后的数据
         
     Returns:
-        tuple: (训练好的模型, 多项式特征对象, 标准化对象)
+        tuple: (训练好的模型, 多项式特征对象, 归一化对象)
     """
     
     print("开始构建响应面模型...")
@@ -33,9 +33,9 @@ def build_and_train_rsm(dataframe):
     print(f"自变量矩阵形状: {X.shape}")
     print(f"目标变量向量形状: {y.shape}")
     
-    # 2. 数据标准化
-    print("正在进行数据标准化...")
-    scaler = StandardScaler()
+    # 2. 数据归一化
+    print("正在进行数据归一化 (Min-Max Scaling)...")
+    scaler = MinMaxScaler()
     X_scaled = scaler.fit_transform(X)
     
     # 3. 生成多项式特征（二次项和交叉项）
@@ -117,13 +117,13 @@ def predict_yield(model, poly_features, scaler, X_input):
     Args:
         model: 训练好的模型
         poly_features: 多项式特征对象
-        scaler: 标准化对象
+        scaler: 归一化对象
         X_input: 输入变量 [T, total_mass, loading_ratio, C, C_e]
         
     Returns:
         float: 预测的C4烯烃收率
     """
-    # 标准化输入
+    # 归一化输入
     X_scaled = scaler.transform(X_input.reshape(1, -1))
     
     # 生成多项式特征
@@ -154,24 +154,24 @@ def save_model_parameters(model, poly_features, feature_columns, filename="model
     intercept = model.intercept_
     
     # 构建方程字符串
-    equation = f"Y = {intercept:.4f} \\\n"
+    equation = f"Y = {intercept:.4f} "
     for coef, name in zip(coefficients, poly_feature_names):
         if coef >= 0:
-            equation += f"    + {abs(coef):.4f} * ({name}) \\\n"
+            equation += f"    + {abs(coef):.4f} * ({name}) "
         else:
-            equation += f"    - {abs(coef):.4f} * ({name}) \\\n"
+            equation += f"    - {abs(coef):.4f} * ({name}) "
             
-    # 移除最后的 " \"
-    equation = equation.rstrip(' \\\n')
+    # 移除最后的 " "
+    equation = equation.rstrip(' ')
     
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             f.write("响应面模型 (RidgeCV) 方程:\n")
             f.write("="*50 + "\n")
             f.write("Y 代表预测的C4烯烃收率。\n")
-            f.write("所有特征（T, total_mass等）在代入方程前都经过了标准化处理。\n")
+            f.write("所有特征（T, total_mass等）在代入方程前都经过了归一化处理 (Min-Max Scaling)。\n")
             f.write("="*50 + "\n\n")
             f.write(equation)
         print(f"✓ 模型方程已成功保存到 {filename}")
     except Exception as e:
-        print(f"错误：保存模型参数失败 - {e}") 
+        print(f"错误：保存模型参数失败 - {e}")
