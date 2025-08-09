@@ -5,7 +5,7 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import r2_score, mean_squared_error
 
-def build_and_train_rsm(dataframe):
+def build_and_train_rsm(dataframe, method_name=None):
     """
     构建并训练响应面模型（RSM）
     
@@ -18,6 +18,7 @@ def build_and_train_rsm(dataframe):
     
     Args:
         dataframe: 预处理后的数据
+        method_name: 装料方式名称，用于区分保存的模型文件
         
     Returns:
         tuple: (训练好的模型, 多项式特征对象, 归一化对象)
@@ -104,7 +105,11 @@ def build_and_train_rsm(dataframe):
         print("❌ 模型泛化能力不足，需要重新设计")
     
     # 9. 保存模型参数到文件
-    save_model_parameters(ridge_cv_model, poly_features, feature_columns)
+    if method_name:
+        filename = f"model_equation_{method_name}.txt"
+    else:
+        filename = "model_equation.txt"
+    save_model_parameters(ridge_cv_model, poly_features, feature_columns, filename)
     
     print("\n响应面模型构建完成！")
     

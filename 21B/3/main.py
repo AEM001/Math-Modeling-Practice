@@ -67,7 +67,7 @@ def run_analysis_for_method(method_name, method_data):
     try:
         # 移除不再需要的列
         model_data = method_data.drop(columns=['catalyst_id', 'M'])
-        model, poly_features, scaler = build_and_train_rsm(model_data)
+        model, poly_features, scaler = build_and_train_rsm(model_data, method_name)
         print(f"✓ {method_name}的响应面模型构建完成")
     except Exception as e:
         print(f"错误: {method_name}模型构建失败 - {e}")
