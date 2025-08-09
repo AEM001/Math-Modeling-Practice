@@ -201,15 +201,7 @@ result = minimize(
 
 ## 依赖环境
 
-### Python包依赖
-```
-pandas>=1.3.0
-numpy>=1.21.0
-scikit-learn>=1.0.0
-scipy>=1.7.0
-matplotlib>=3.5.0
-seaborn>=0.11.0
-```
+
 
 ### 数据文件
 - `附件1.csv`: 性能数据表

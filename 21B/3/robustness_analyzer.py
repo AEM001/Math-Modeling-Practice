@@ -2,8 +2,7 @@ import numpy as np
 import pandas as pd
 from model_builder import predict_yield
 
-def analyze_robustness_and_report(optimal_solution, model, poly_features, scaler, 
-                                discrete_options):
+def analyze_robustness_and_report(optimal_solution, model, poly_features, scaler):
     """
     稳健性分析
     
@@ -14,7 +13,6 @@ def analyze_robustness_and_report(optimal_solution, model, poly_features, scaler
         model: 训练好的模型
         poly_features: 多项式特征对象
         scaler: 标准化对象
-        discrete_options: 离散变量选项
     """
     
     print("\n" + "="*60)
@@ -28,14 +26,13 @@ def analyze_robustness_and_report(optimal_solution, model, poly_features, scaler
     print(f"温度: {best_params['T']:.2f}°C")
     print(f"总质量: {best_params['total_mass']:.2f} mg")
     print(f"装料比: {best_params['loading_ratio']:.2f}")
-    print(f"Co负载量: {best_params['C']} wt%")
-    print(f"乙醇浓度: {best_params['C_e']} ml/min")
-    print(f"装料方式: {'B系列' if best_params['M'] == 1 else 'A系列'}")
+    print(f"Co负载量: {best_params['C']:.2f} wt%")
+    print(f"乙醇浓度: {best_params['C_e']:.2f} ml/min")
     print(f"预测收率: {max_yield:.4f}")
     
     # 进行稳健性分析
     robustness_results = perform_robustness_analysis(
-        best_params, model, poly_features, scaler, discrete_options
+        best_params, model, poly_features, scaler
     )
     
     # 打印稳健性分析结果
@@ -43,8 +40,7 @@ def analyze_robustness_and_report(optimal_solution, model, poly_features, scaler
     
     return robustness_results
 
-def perform_robustness_analysis(best_params, model, poly_features, scaler, 
-                              discrete_options):
+def perform_robustness_analysis(best_params, model, poly_features, scaler):
     """
     执行稳健性分析
     
@@ -53,7 +49,6 @@ def perform_robustness_analysis(best_params, model, poly_features, scaler,
         model: 训练好的模型
         poly_features: 多项式特征对象
         scaler: 标准化对象
-        discrete_options: 离散变量选项
         
     Returns:
         dict: 稳健性分析结果
@@ -62,7 +57,7 @@ def perform_robustness_analysis(best_params, model, poly_features, scaler,
     # 获取基准收率
     base_params = np.array([
         best_params['T'], best_params['total_mass'], best_params['loading_ratio'],
-        best_params['C'], best_params['C_e'], best_params['M']
+        best_params['C'], best_params['C_e']
     ])
     
     # 标准化输入
@@ -78,24 +73,16 @@ def perform_robustness_analysis(best_params, model, poly_features, scaler,
     perturbation_results = {}
     
     # 对每个参数进行扰动分析
-    param_names = ['T', 'total_mass', 'loading_ratio', 'C', 'C_e', 'M']
-    param_labels = ['温度', '总质量', '装料比', 'Co负载量', '乙醇浓度', '装料方式']
+    param_names = ['T', 'total_mass', 'loading_ratio', 'C', 'C_e']
+    param_labels = ['温度', '总质量', '装料比', 'Co负载量', '乙醇浓度']
     
     for i, (param_name, param_label) in enumerate(zip(param_names, param_labels)):
         print(f"\n正在分析 {param_label} 的稳健性...")
         
-        # 将 C 和 C_e 加入连续变量的判断
-        if param_name in ['T', 'total_mass', 'loading_ratio', 'C', 'C_e']:
-            # 连续变量
-            yield_changes = analyze_continuous_parameter(
-                base_params, i, param_name, model, poly_features, scaler
-            )
-        else:
-            # 离散变量 (现在只剩下 M)
-            yield_changes = analyze_discrete_parameter(
-                base_params, i, param_name, discrete_options[param_name], 
-                model, poly_features, scaler
-            )
+        # 所有变量均为连续变量
+        yield_changes = analyze_continuous_parameter(
+            base_params, i, param_name, model, poly_features, scaler
+        )
         
         perturbation_results[param_name] = {
             'label': param_label,
@@ -150,52 +137,6 @@ def analyze_continuous_parameter(base_params, param_index, param_name, model,
         # 预测收率
         yield_pred = model.predict(X_poly)[0]
         yields.append(yield_pred)
-    
-    return {
-        'test_values': test_values,
-        'yields': yields,
-        'min_yield': min(yields),
-        'max_yield': max(yields),
-        'yield_range': max(yields) - min(yields)
-    }
-
-def analyze_discrete_parameter(base_params, param_index, param_name, discrete_options, 
-                            model, poly_features, scaler):
-    """
-    分析离散参数的稳健性
-    
-    Args:
-        base_params: 基准参数
-        param_index: 参数索引
-        param_name: 参数名称
-        discrete_options: 离散选项
-        model: 模型
-        poly_features: 多项式特征对象
-        scaler: 标准化对象
-        
-    Returns:
-        dict: 收率变化结果
-    """
-    
-    base_value = base_params[param_index]
-    yields = []
-    test_values = []
-    
-    for option in discrete_options:
-        # 创建扰动后的参数
-        perturbed_params = base_params.copy()
-        perturbed_params[param_index] = option
-        
-        # 标准化输入
-        X_scaled = scaler.transform(perturbed_params.reshape(1, -1))
-        
-        # 生成多项式特征
-        X_poly = poly_features.transform(X_scaled)
-        
-        # 预测收率
-        yield_pred = model.predict(X_poly)[0]
-        yields.append(yield_pred)
-        test_values.append(option)
     
     return {
         'test_values': test_values,

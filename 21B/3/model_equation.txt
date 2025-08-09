@@ -4,19 +4,24 @@ Y 代表预测的C4烯烃收率。
 所有特征（T, total_mass等）在代入方程前都经过了标准化处理。
 ==================================================
 
-Y = 3.6700 \
-    + 4.5753 * (T) \
-    + 1.4752 * (total_mass) \
+Y = 1.9920 \
+    + 3.6755 * (T) \
+    + 1.1655 * (total_mass) \
     + 0.0000 * (loading_ratio) \
     + 0.0000 * (C) \
-    - 0.4617 * (C_e) \
-    + 1.6990 * (T total_mass) \
+    - 0.9339 * (C_e) \
+    + 2.5954 * (T^2) \
+    + 1.6729 * (T total_mass) \
     + 0.0000 * (T loading_ratio) \
     + 0.0000 * (T C) \
-    - 0.6318 * (T C_e) \
+    - 0.6481 * (T C_e) \
+    - 0.9284 * (total_mass^2) \
     + 0.0000 * (total_mass loading_ratio) \
     + 0.0000 * (total_mass C) \
-    + 0.0249 * (total_mass C_e) \
+    - 0.1839 * (total_mass C_e) \
+    + 0.0000 * (loading_ratio^2) \
     + 0.0000 * (loading_ratio C) \
     + 0.0000 * (loading_ratio C_e) \
-    + 0.0000 * (C C_e)
+    + 0.0000 * (C^2) \
+    + 0.0000 * (C C_e) \
+    - 0.0921 * (C_e^2)

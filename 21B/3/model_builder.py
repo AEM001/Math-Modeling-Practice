@@ -26,7 +26,7 @@ def build_and_train_rsm(dataframe):
     print("开始构建响应面模型...")
     
     # 1. 分离自变量和目标变量
-    feature_columns = ['T', 'total_mass', 'loading_ratio', 'C', 'C_e', 'M']
+    feature_columns = ['T', 'total_mass', 'loading_ratio', 'C', 'C_e']
     X = dataframe[feature_columns].values
     y = dataframe['Y'].values
     
@@ -118,7 +118,7 @@ def predict_yield(model, poly_features, scaler, X_input):
         model: 训练好的模型
         poly_features: 多项式特征对象
         scaler: 标准化对象
-        X_input: 输入变量 [T, total_mass, loading_ratio, C, C_e, M]
+        X_input: 输入变量 [T, total_mass, loading_ratio, C, C_e]
         
     Returns:
         float: 预测的C4烯烃收率
