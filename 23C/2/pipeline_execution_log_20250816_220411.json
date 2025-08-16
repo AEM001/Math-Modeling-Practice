@@ -1,0 +1,79 @@
+{
+  "pipeline_config": {
+    "data_paths": {
+      "raw_item_data": "data/raw/单品级每日汇总表.csv",
+      "raw_category_data": "data/raw/品类级每日汇总表.csv",
+      "processed_data_dir": "data/processed",
+      "train_data": "data/processed/train_data_cleaned.csv",
+      "test_data": "data/processed/test_data_cleaned.csv",
+      "train_features": "data/processed/train_features.csv",
+      "test_features": "data/processed/test_features.csv"
+    },
+    "output_paths": {
+      "reports_dir": "reports",
+      "figures_dir": "outputs/figures",
+      "results_dir": "outputs/results"
+    },
+    "data_cleaning": {
+      "outlier_threshold": 3.0,
+      "price_multiplier_threshold": 3.0,
+      "min_sales_threshold": 0.1,
+      "train_split_ratio": 0.7
+    },
+    "feature_engineering": {
+      "rolling_windows": [
+        7,
+        14
+      ],
+      "lag_periods": [
+        1,
+        7
+      ],
+      "enable_interaction_features": true
+    },
+    "modeling": {
+      "test_size": 0.2,
+      "cv_folds": 3,
+      "random_state": 42,
+      "models_to_test": [
+        "OLS",
+        "Huber",
+        "RandomForest",
+        "GradientBoosting"
+      ]
+    },
+    "optimization": {
+      "optimization_horizon": 7,
+      "service_level": 0.8,
+      "min_markup_ratio": 1.05,
+      "max_markup_ratio": 2.5,
+      "max_daily_price_change": 0.1,
+      "price_smoothing_weight": 0.1,
+      "quantity_smoothing_weight": 0.05,
+      "stockout_penalty_weight": 2.0,
+      "wastage_penalty_weight": 0.5,
+      "monte_carlo_samples": 50
+    },
+    "backtesting": {
+      "min_train_days": 30,
+      "test_days": 7,
+      "step_days": 7,
+      "max_splits": 6
+    }
+  },
+  "execution_log": [
+    {
+      "timestamp": "2025-08-16 22:04:11",
+      "module": "可视化生成",
+      "status": "success",
+      "message": "生成了3个图表",
+      "duration_seconds": 2.100021
+    }
+  ],
+  "summary": {
+    "total_modules": 1,
+    "successful_modules": 1,
+    "failed_modules": 0,
+    "total_duration": 2.100021
+  }
+}
