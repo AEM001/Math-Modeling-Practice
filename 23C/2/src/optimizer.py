@@ -65,40 +65,52 @@ class VegetableOptimizer:
             print("使用默认需求模型")
     
     def predict_demand(self, category, price, base_quantity=15.0):
-        """简化的需求预测"""
+        """改进的需求预测函数"""
         if category not in self.demand_models:
-            return base_quantity, base_quantity * 0.2
+            return base_quantity, base_quantity * 0.15
         
         model_info = self.demand_models[category]
         elasticity = model_info['price_elasticity']
         
-        # 简化的需求预测（基于价格弹性）
-        base_price = 8.0  # 假设基准价格
-        price_effect = (price / base_price) ** elasticity
+        # 使用更合理的基准价格（基于品类）
+        base_price_map = {
+            '花叶类': 7.5, '辣椒类': 8.0, '花菜类': 12.0, 
+            '食用菌': 16.0, '茄类': 6.0, '水生根茎类': 9.0
+        }
+        base_price = base_price_map.get(category, 8.0)
+        
+        # 改进的弹性计算
+        if abs(elasticity) < 0.1:  # 避免极小弹性值
+            elasticity = -0.5
+        
+        # 价格效应计算
+        price_ratio = price / base_price
+        price_effect = price_ratio ** elasticity
+        
+        # 预测需求，确保合理范围
         predicted_demand = base_quantity * price_effect
+        predicted_demand = np.clip(predicted_demand, base_quantity * 0.3, base_quantity * 3.0)
         
-        # 确保预测量为正
-        predicted_demand = max(predicted_demand, 1.0)
-        
-        # 需求标准差（基于R²估算不确定性）
-        uncertainty_factor = max(0.1, 1 - model_info['test_r2'])
-        demand_std = predicted_demand * uncertainty_factor * 0.3
+        # 需求不确定性
+        uncertainty_factor = max(0.05, 1 - model_info['test_r2']) * 0.2
+        demand_std = predicted_demand * uncertainty_factor
         
         return predicted_demand, demand_std
     
     def calculate_profit_scenarios(self, category, price, quantity, wholesale_cost, 
-                                 n_scenarios=20, wastage_rate=0.1):
-        """计算利润场景"""
-        # 预测需求
-        mean_demand, std_demand = self.predict_demand(category, price)
+                                 base_quantity=15.0, n_scenarios=20, wastage_rate=0.05):
+        """改进的利润场景计算"""
+        # 预测需求，传入正确的基准数量
+        mean_demand, std_demand = self.predict_demand(category, price, base_quantity)
         
         # 生成需求场景
+        np.random.seed(42)  # 设置随机种子保证结果稳定
         demand_scenarios = np.random.normal(mean_demand, std_demand, n_scenarios)
-        demand_scenarios = np.maximum(demand_scenarios, 0.5)  # 确保非负
+        demand_scenarios = np.maximum(demand_scenarios, 0.1)  # 确保非负
         
         profits = []
         for demand in demand_scenarios:
-            # 可销售量（考虑损耗）
+            # 可销售量（减少损耗率）
             available_quantity = quantity * (1 - wastage_rate)
             actual_sales = min(demand, available_quantity)
             
@@ -108,9 +120,9 @@ class VegetableOptimizer:
             # 成本
             cost = quantity * wholesale_cost
             
-            # 缺货惩罚（简化）
+            # 减少缺货惩罚
             stockout = max(0, demand - actual_sales)
-            stockout_penalty = stockout * price * 0.1  # 简化的缺货成本
+            stockout_penalty = stockout * wholesale_cost * 0.05  # 使用批发价作为基准，降低惩罚
             
             # 净利润
             profit = revenue - cost - stockout_penalty
@@ -119,22 +131,21 @@ class VegetableOptimizer:
         return np.array(profits)
     
     def optimize_category_heuristic(self, category, wholesale_cost, base_quantity):
-        """启发式优化单个品类"""
+        """改进的启发式优化"""
         if category not in self.demand_models:
-            # 默认策略
             optimal_price = wholesale_cost * 1.3
             optimal_quantity = base_quantity * 1.1
         else:
             model_info = self.demand_models[category]
-            elasticity = model_info['price_elasticity']
+            elasticity = abs(model_info['price_elasticity'])
             
-            # 基于弹性的启发式定价
-            if abs(elasticity) > 0.8:  # 高弹性：薄利多销
-                markup = np.random.uniform(1.15, 1.25)
-            elif abs(elasticity) > 0.4:  # 中等弹性
-                markup = np.random.uniform(1.25, 1.4)
+            # 更稳定的定价策略（减少随机性）
+            if elasticity > 0.7:  # 高弹性：薄利多销
+                markup = 1.20
+            elif elasticity > 0.5:  # 中等弹性
+                markup = 1.35
             else:  # 低弹性：可以高加成
-                markup = np.random.uniform(1.4, 1.6)
+                markup = 1.50
             
             # 限制在配置范围内
             markup = np.clip(markup, self.opt_config['min_markup_ratio'], 
@@ -142,13 +153,36 @@ class VegetableOptimizer:
             
             optimal_price = wholesale_cost * markup
             
-            # 基于需求预测的补货量
-            predicted_demand, _ = self.predict_demand(category, optimal_price, base_quantity)
-            safety_factor = 1.1 + np.random.normal(0, 0.05)  # 安全系数
-            optimal_quantity = predicted_demand * safety_factor
+            # 基于多个定价选项的利润最优化
+            best_profit = -float('inf')
+            best_price = optimal_price
+            best_quantity = base_quantity
+            
+            # 测试不同的价格点
+            test_prices = [wholesale_cost * m for m in [1.15, 1.25, 1.35, 1.45, 1.55]]
+            test_prices = [p for p in test_prices if self.opt_config['min_markup_ratio'] * wholesale_cost <= p <= self.opt_config['max_markup_ratio'] * wholesale_cost]
+            
+            for test_price in test_prices:
+                # 预测该价格下的需求
+                predicted_demand, _ = self.predict_demand(category, test_price, base_quantity)
+                test_quantity = predicted_demand * 1.15  # 安全库存
+                
+                # 计算预期利润
+                profit_scenarios = self.calculate_profit_scenarios(
+                    category, test_price, test_quantity, wholesale_cost, base_quantity, n_scenarios=10
+                )
+                avg_profit = np.mean(profit_scenarios)
+                
+                if avg_profit > best_profit:
+                    best_profit = avg_profit
+                    best_price = test_price
+                    best_quantity = test_quantity
+            
+            optimal_price = best_price
+            optimal_quantity = best_quantity
         
-        # 限制最小值
-        optimal_quantity = max(optimal_quantity, base_quantity * 0.5)
+        # 确保最小值
+        optimal_quantity = max(optimal_quantity, base_quantity * 0.7)
         
         return optimal_price, optimal_quantity
     
@@ -157,10 +191,10 @@ class VegetableOptimizer:
         forecasts = {}
         horizon = self.opt_config['optimization_horizon']
         
-        # 各品类基准批发价
+        # 各品类基准批发价（更合理的价格）
         base_wholesale_prices = {
-            '花叶类': 5.0, '辣椒类': 6.0, '花菜类': 8.0, 
-            '食用菌': 12.0, '茄类': 4.5, '水生根茎类': 7.0
+            '花叶类': 5.5, '辣椒类': 6.5, '花菜类': 9.0, 
+            '食用菌': 13.0, '茄类': 4.8, '水生根茎类': 7.5
         }
         
         for category, base_price in base_wholesale_prices.items():
@@ -168,10 +202,10 @@ class VegetableOptimizer:
             current_price = base_price
             
             for day in range(horizon):
-                # 添加随机波动
-                price_change = np.random.normal(0, 0.03)  # 3%的日波动
+                # 减少随机波动，使用更稳定的预测
+                price_change = np.random.normal(0, 0.01)  # 1%的日波动
                 current_price *= (1 + price_change)
-                current_price = max(current_price, base_price * 0.7)  # 最低不低于基价的70%
+                current_price = max(current_price, base_price * 0.9)  # 最低不低于基价的90%
                 daily_forecasts.append(current_price)
             
             forecasts[category] = daily_forecasts
@@ -210,9 +244,9 @@ class VegetableOptimizer:
                 date = f"2023-07-{day+1:02d}"
                 wholesale_cost = wholesale_costs[day]
                 
-                # 每日基准量加随机波动
-                daily_base_qty = base_quantity * (1 + np.random.normal(0, 0.1))
-                daily_base_qty = max(daily_base_qty, base_quantity * 0.7)
+                # 每日基准量，减少随机波动
+                daily_base_qty = base_quantity * (1 + np.random.normal(0, 0.05))
+                daily_base_qty = max(daily_base_qty, base_quantity * 0.8)
                 
                 # 启发式优化
                 optimal_price, optimal_quantity = self.optimize_category_heuristic(
@@ -222,7 +256,7 @@ class VegetableOptimizer:
                 # 计算预期利润
                 profit_scenarios = self.calculate_profit_scenarios(
                     category, optimal_price, optimal_quantity, wholesale_cost,
-                    n_scenarios=self.opt_config['monte_carlo_samples']
+                    daily_base_qty, n_scenarios=self.opt_config['monte_carlo_samples']
                 )
                 expected_profit = np.mean(profit_scenarios)
                 profit_std = np.std(profit_scenarios)
