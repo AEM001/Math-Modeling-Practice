@@ -8,8 +8,13 @@ import numpy as np
 import json
 import os
 from datetime import datetime
+import matplotlib.pyplot as plt
+import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
+
+# 导入字体配置
+from font_config import setup_chinese_font
 
 class VegetableOptimizer:
     """精简版蔬菜定价与补货优化器"""
@@ -337,8 +342,130 @@ class VegetableOptimizer:
         print(f"  - 详细结果: {detailed_path}")
         print(f"  - 周策略: {weekly_path}")
     
+    def plot_price_quantity_profit_analysis(self):
+        """绘制价格-销量-利润扫描图"""
+        try:
+            # 设置中文字体
+            setup_chinese_font()
+            
+            categories = list(self.demand_models.keys())
+            if not categories:
+                print("没有可用的需求模型")
+                return None
+            
+            # 创建子图
+            n_categories = len(categories)
+            cols = 2
+            rows = (n_categories + cols - 1) // cols
+            
+            fig, axes = plt.subplots(rows, cols, figsize=(15, 6*rows))
+            fig.suptitle('各品类价格-销量-利润关系分析', fontsize=16, fontweight='bold')
+            
+            if rows == 1:
+                axes = axes.reshape(1, -1)
+            
+            # 各品类基础数据
+            base_quantities = {
+                '花叶类': 25.0, '辣椒类': 15.0, '花菜类': 20.0,
+                '食用菌': 12.0, '茄类': 18.0, '水生根茎类': 10.0
+            }
+            
+            base_wholesale_prices = {
+                '花叶类': 5.5, '辣椒类': 6.5, '花菜类': 9.0, 
+                '食用菌': 13.0, '茄类': 4.8, '水生根茎类': 7.5
+            }
+            
+            for i, category in enumerate(categories):
+                row, col = i // cols, i % cols
+                ax = axes[row, col]
+                
+                base_quantity = base_quantities.get(category, 15.0)
+                wholesale_cost = base_wholesale_prices.get(category, 8.0)
+                
+                # 生成价格区间（基于加成率）
+                markup_ratios = np.linspace(1.1, 2.0, 20)
+                prices = wholesale_cost * markup_ratios
+                
+                quantities = []
+                profits = []
+                
+                for price in prices:
+                    # 预测需求
+                    predicted_demand, _ = self.predict_demand(category, price, base_quantity)
+                    quantities.append(predicted_demand)
+                    
+                    # 计算利润（简化）
+                    quantity_to_stock = predicted_demand * 1.1  # 安全库存
+                    profit = (price - wholesale_cost) * predicted_demand - \
+                             max(0, quantity_to_stock - predicted_demand) * wholesale_cost * 0.1
+                    profits.append(profit)
+                
+                # 双 y 轴图
+                ax2 = ax.twinx()
+                
+                # 绘制价格-销量关系
+                line1 = ax.plot(prices, quantities, 'b-', linewidth=2, label='预测需求')
+                ax.set_xlabel('价格 (元/千克)')
+                ax.set_ylabel('需求量 (千克)', color='b')
+                ax.tick_params(axis='y', labelcolor='b')
+                
+                # 绘制价格-利润关系
+                line2 = ax2.plot(prices, profits, 'r-', linewidth=2, label='预期利润')
+                ax2.set_ylabel('预期利润 (元)', color='r')
+                ax2.tick_params(axis='y', labelcolor='r')
+                
+                # 找到最优利润点
+                max_profit_idx = np.argmax(profits)
+                optimal_price = prices[max_profit_idx]
+                optimal_quantity = quantities[max_profit_idx]
+                optimal_profit = profits[max_profit_idx]
+                
+                # 标记最优点
+                ax.scatter([optimal_price], [optimal_quantity], color='green', s=100, zorder=5)
+                ax2.scatter([optimal_price], [optimal_profit], color='green', s=100, zorder=5)
+                
+                # 添加最优点标注
+                ax.annotate(f'最优点\n价格: {optimal_price:.2f}\n需求: {optimal_quantity:.1f}', 
+                           xy=(optimal_price, optimal_quantity), xytext=(10, 10),
+                           textcoords='offset points', fontsize=9,
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                           arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+                
+                ax.set_title(f'{category}', fontweight='bold')
+                ax.grid(True, alpha=0.3)
+                
+                # 显示弹性系数
+                elasticity = self.demand_models[category]['price_elasticity']
+                ax.text(0.02, 0.98, f'价格弹性: {elasticity:.3f}', 
+                       transform=ax.transAxes, fontsize=10, verticalalignment='top',
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='lightblue', alpha=0.7))
+            
+            # 隐藏多余的子图
+            for i in range(n_categories, rows * cols):
+                row, col = i // cols, i % cols
+                axes[row, col].set_visible(False)
+            
+            plt.tight_layout()
+            
+            # 保存图片
+            os.makedirs(self.output_paths['figures_dir'], exist_ok=True)
+            fig_path = os.path.join(self.output_paths['figures_dir'], 'price_quantity_profit_analysis.png')
+            plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"价格-销量-利润分析图已保存: {fig_path}")
+            return fig_path
+            
+        except Exception as e:
+            print(f"绘制价格-销量-利润分析图失败: {e}")
+            return None
+    
     def generate_optimization_report(self, results):
         """生成优化报告"""
+        # 生成价格-销量-利润分析图
+        print("生成价格-销量-利润关系分析...")
+        self.plot_price_quantity_profit_analysis()
+        
         report_content = [
             "# 优化策略报告",
             f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -372,6 +499,12 @@ class VegetableOptimizer:
         report_content.append("- 使用启发式算法基于需求弹性进行定价")
         report_content.append("- 考虑库存风险和缺货成本")
         report_content.append("- 基于蒙特卡洛模拟评估利润期望")
+        report_content.append("")
+        report_content.append("## 关系分析")
+        report_content.append("- 价格-销量-利润关系图: 展示成本加成定价对销售总量和利润的影响")
+        report_content.append("- 图表中绿色点标示理论上的最优定价点")
+        report_content.append("- 蓝线显示价格对需求的影响，红线显示价格对利润的影响")
+        report_content.append("- 分析结果保存在 outputs/figures/ 目录下")
         
         # 保存报告
         os.makedirs(self.output_paths['reports_dir'], exist_ok=True)

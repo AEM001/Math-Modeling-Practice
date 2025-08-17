@@ -28,7 +28,7 @@
     "test_size": 0.2,
     "cv_folds": 3,
     "random_state": 42,
-    "models_to_test": ["OLS", "Huber", "RandomForest", "GradientBoosting"]
+    "models_to_test": ["LinearRegression", "HuberRegressor", "RandomForest", "GradientBoosting"]
   },
   "optimization": {
     "optimization_horizon": 7,

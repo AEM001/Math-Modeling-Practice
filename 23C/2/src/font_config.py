@@ -6,6 +6,7 @@
 
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import matplotlib as mpl
 import platform
 
 def setup_chinese_font():
@@ -17,10 +18,10 @@ def setup_chinese_font():
     # macOS系统的中文字体选择
     if system == 'Darwin':  # macOS
         chinese_fonts = [
+            'PingFang HK',
             'PingFang SC',
-            'PingFang HK', 
-            'Heiti TC',
             'STHeiti',
+            'Heiti TC',
             'Kaiti SC',
             'Arial Unicode MS',
             'Songti SC',
@@ -38,10 +39,10 @@ def setup_chinese_font():
     # Linux系统的中文字体选择
     else:
         chinese_fonts = [
-            'DejaVu Sans',
             'Noto Sans CJK SC',
             'WenQuanYi Micro Hei',
-            'AR PL UMing CN'
+            'AR PL UMing CN',
+            'DejaVu Sans'
         ]
     
     # 查找系统中可用的中文字体
@@ -66,9 +67,28 @@ def setup_chinese_font():
         if selected_font is None:
             selected_font = 'sans-serif'
     
-    # 配置matplotlib
-    plt.rcParams['font.sans-serif'] = [selected_font, 'sans-serif']
-    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+    # 强制设置所有字体相关参数
+    mpl.rcParams['font.sans-serif'] = [selected_font, 'DejaVu Sans', 'Arial', 'sans-serif']
+    mpl.rcParams['font.family'] = [selected_font]
+    mpl.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+    
+    # 设置所有文本相关的字体
+    mpl.rcParams['font.serif'] = [selected_font, 'serif']
+    mpl.rcParams['font.monospace'] = [selected_font, 'monospace']
+    
+    # 清除并重新加载字体管理器
+    try:
+        fm._rebuild()
+        fm._load_fontmanager(try_read_cache=False)
+    except:
+        try:
+            import matplotlib.pyplot as plt
+            plt.rcdefaults()
+            mpl.rcParams['font.sans-serif'] = [selected_font]
+            mpl.rcParams['font.family'] = 'sans-serif'
+            mpl.rcParams['axes.unicode_minus'] = False
+        except:
+            pass
     
     print(f"已设置中文字体: {selected_font}")
     return selected_font

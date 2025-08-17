@@ -146,6 +146,3 @@ python main_pipeline.py --config custom_config.json
 4. **结果可解释**: 详细的分析报告和指标输出
 5. **模块化**: 支持按需运行特定功能模块
 
----
-
-**最后更新**: 2025-08-16
