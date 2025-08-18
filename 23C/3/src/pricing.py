@@ -96,22 +96,24 @@ def create_final_plan(solution_df):
     # 按照要求的格式整理数据
     plan_df = solution_df.copy()
     
-    # 重命名列以符合输出要求
-    column_mapping = {
-        '单品编码': '单品编码',
-        '单品名称': '单品名称', 
-        '分类名称': '分类名称',
-        '进货量(kg)': '进货量(kg)',
-        '加成率': '加成率',
-        '售价(元/kg)': '售价(元/kg)',
-        '预测销量(kg)': '预测销量(kg)',
-        '预测批发价(元/kg)': '预测批发价(元/kg)',
-        '预估利润(元)': '预估利润(元)'
-    }
+    # 确保包含所有必需列
+    required_columns = [
+        '单品编码', '单品名称', '分类编码', '分类名称',
+        '进货量(kg)', '加成率', '售价(元/kg)', 
+        '预测销量(kg)', '预测批发价(元/kg)', '预估利润(元)'
+    ]
     
-    # 选择和重命名列
-    final_columns = list(column_mapping.keys())
-    plan_df = plan_df[final_columns].copy()
+    # 检查并填补缺失列
+    for col in required_columns:
+        if col not in plan_df.columns:
+            if col == '分类编码':
+                # 分类编码缺失时用默认值填补
+                plan_df['分类编码'] = '1011010000'
+            else:
+                plan_df[col] = 0
+    
+    # 选择最终列
+    plan_df = plan_df[required_columns].copy()
     
     # 按预估利润降序排列
     plan_df = plan_df.sort_values('预估利润(元)', ascending=False)
@@ -255,6 +257,13 @@ def export_category_analysis(plan_df, file_path):
     """
     logger.info(f"Exporting category analysis to {file_path}")
     
+    # 计算缺失的列
+    if '预估收入(元)' not in plan_df.columns:
+        plan_df['预估收入(元)'] = plan_df['预测销量(kg)'] * plan_df['售价(元/kg)']
+    
+    if '进货成本(元)' not in plan_df.columns:
+        plan_df['进货成本(元)'] = plan_df['进货量(kg)'] * plan_df['预测批发价(元/kg)']
+    
     # 按品类汇总
     category_analysis = plan_df.groupby(['分类编码', '分类名称']).agg({
         '单品编码': 'count',
@@ -296,6 +305,8 @@ def export_category_analysis(plan_df, file_path):
     
     logger.info("Category analysis exported successfully")
 
+from config import MIN_SHELF_COUNT, MAX_SHELF_COUNT
+
 def validate_plan(plan_df):
     """
     验证计划的合理性
@@ -304,12 +315,14 @@ def validate_plan(plan_df):
     
     issues = []
     
-    # 检查基本约束
-    if len(plan_df) < 27:
-        issues.append(f"产品数量不足: {len(plan_df)} < 27")
+    # 检查基本约束（自适应候选数量：以计划行数作为可选上限）
+    effective_min = min(MIN_SHELF_COUNT, len(plan_df))
+    effective_max = min(MAX_SHELF_COUNT, len(plan_df))
+    if len(plan_df) < effective_min:
+        issues.append(f"产品数量不足: {len(plan_df)} < {effective_min}")
     
-    if len(plan_df) > 33:
-        issues.append(f"产品数量超限: {len(plan_df)} > 33")
+    if len(plan_df) > effective_max:
+        issues.append(f"产品数量超限: {len(plan_df)} > {effective_max}")
     
     # 检查进货量
     min_stock = plan_df['进货量(kg)'].min()

@@ -56,7 +56,9 @@ class SalesForecaster:
         
         # 过滤存在的特征列
         available_features = [col for col in feature_cols if col in df.columns]
-        self.feature_columns = available_features
+        # 仅在还未训练时记录训练特征集；预测时以训练时的列为准
+        if not self.is_trained:
+            self.feature_columns = available_features
         
         logger.info(f"Selected {len(available_features)} features for sales forecasting")
         
@@ -111,7 +113,19 @@ class SalesForecaster:
         if not self.is_trained:
             raise ValueError("Model must be trained before prediction")
         
-        X = self.prepare_features(df)
+        # 按训练时的列顺序取特征；若预测阶段缺失某些列，则用0填充
+        X_all = df.copy()
+        # 确保构建过全部特征（包括周几统计等）
+        X_all = self.prepare_features(X_all)
+        missing_cols = []
+        for col in self.feature_columns:
+            if col not in X_all.columns:
+                X_all[col] = 0.0
+                missing_cols.append(col)
+        if missing_cols:
+            logger.warning(f"Prediction missing {len(missing_cols)} trained features, filled with 0: {missing_cols}")
+        X = X_all[self.feature_columns].fillna(0)
+        
         predictions = self.model.predict(X)
         
         # 确保预测值非负
@@ -258,7 +272,8 @@ def forecast_sales_and_prices(df, target_date=TARGET_DATE):
     # 7. 整合预测结果
     results = []
     
-    for idx, row in pred_df.iterrows():
+    pred_df_reset = pred_df.reset_index(drop=True)
+    for i, row in pred_df_reset.iterrows():
         product_code = row['单品编码']
         
         # 获取批发价预测
@@ -283,10 +298,10 @@ def forecast_sales_and_prices(df, target_date=TARGET_DATE):
             '单品名称': row['单品名称'],
             '分类编码': row['分类编码'],
             '分类名称': row['分类名称'],
-            'pred_Q_p': pred_sales[idx],
-            'pred_C': pred_wholesale_price,
-            'model_quality': model_quality,
-            'is_saturday': row['is_saturday']
+            'pred_Q_p': float(pred_sales[i]),
+            'pred_C': float(pred_wholesale_price),
+            'model_quality': float(model_quality),
+            'is_saturday': int(row['is_saturday'])
         })
     
     results_df = pd.DataFrame(results)

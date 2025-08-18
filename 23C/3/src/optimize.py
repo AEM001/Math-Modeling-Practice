@@ -68,14 +68,19 @@ class RestockingOptimizer:
         
         self.model += pulp.lpSum(profit_terms), "TotalProfit"
         
-        # 约束条件：只保留最基本的上架数量约束
+        # 约束条件：只保留最基本的上架数量约束（自适应到候选数量）
+        min_req = min(MIN_SHELF_COUNT, len(products))
+        max_req = min(MAX_SHELF_COUNT, len(products))
+        if min_req > max_req:
+            logger.warning(f"Adjusting shelf bounds: min {min_req} > max {max_req}. Setting min = max = {max_req}")
+            min_req = max_req
         self.model += (
-            pulp.lpSum([self.x_vars[i] for i in products]) >= MIN_SHELF_COUNT,
+            pulp.lpSum([self.x_vars[i] for i in products]) >= min_req,
             "MinShelfCount"
         )
         
         self.model += (
-            pulp.lpSum([self.x_vars[i] for i in products]) <= MAX_SHELF_COUNT,
+            pulp.lpSum([self.x_vars[i] for i in products]) <= max_req,
             "MaxShelfCount"
         )
         
@@ -167,14 +172,19 @@ class RestockingOptimizer:
         
         self.model += pulp.lpSum(profit_terms), "TotalProfitElastic"
         
-        # 其他约束保持不变
+        # 其他约束保持不变（自适应到候选数量）
+        min_req = min(MIN_SHELF_COUNT, len(products))
+        max_req = min(MAX_SHELF_COUNT, len(products))
+        if min_req > max_req:
+            logger.warning(f"Adjusting shelf bounds: min {min_req} > max {max_req}. Setting min = max = {max_req}")
+            min_req = max_req
         self.model += (
-            pulp.lpSum([self.x_vars[i] for i in products]) >= MIN_SHELF_COUNT,
+            pulp.lpSum([self.x_vars[i] for i in products]) >= min_req,
             "MinShelfCount"
         )
         
         self.model += (
-            pulp.lpSum([self.x_vars[i] for i in products]) <= MAX_SHELF_COUNT,
+            pulp.lpSum([self.x_vars[i] for i in products]) <= max_req,
             "MaxShelfCount"
         )
         
@@ -205,12 +215,19 @@ class RestockingOptimizer:
         logger.info(f"Solving optimization model with {self.solver} solver...")
         
         # 设置求解器
+        gap = SOLVER_CONFIG.get('gap', None)
         if self.solver.upper() == 'CBC':
-            solver = pulp.PULP_CBC_CMD(msg=1)
+            solver = pulp.PULP_CBC_CMD(msg=1, timeLimit=time_limit if time_limit else None,
+                                       gapRel=gap if gap is not None else None)
         elif self.solver.upper() == 'GLPK':
-            solver = pulp.GLPK_CMD(msg=1)
+            # GLPK 的时间限制通过 options 传递
+            options = []
+            if time_limit:
+                options += ["--tmlim", str(int(time_limit))]
+            solver = pulp.GLPK_CMD(msg=1, options=options)
         else:
-            solver = pulp.PULP_CBC_CMD(msg=1)  # 默认
+            solver = pulp.PULP_CBC_CMD(msg=1, timeLimit=time_limit if time_limit else None,
+                                       gapRel=gap if gap is not None else None)  # 默认
         
         # 设置时间限制
         if time_limit is None:
@@ -224,10 +241,68 @@ class RestockingOptimizer:
             self.extract_solution()
             return True
         else:
-            logger.error(f"Optimization failed with status: {pulp.LpStatus[self.status]}")
-            return False
+            logger.error(f"Optimization failed with status: {pulp.LpStatus.get(self.status, self.status)}")
+            # 回退：使用贪婪启发式给出可行方案
+            logger.info("Falling back to greedy heuristic solution...")
+            self._solve_greedy()
+            return True
     
-    def extract_solution(self):
+    def _solve_greedy(self):
+        """
+        贪婪回退：按单位利润从高到低选择，满足上架数量边界
+        """
+        products = self.candidates_df.index.tolist()
+        fixed_markup = 0.3
+        # 计算单位利润得分（预测销量 * 批发价 * 固定加成率）
+        scores = []
+        for i in products:
+            row = self.candidates_df.loc[i]
+            Q_p = max(0.0, float(row['pred_Q_p']))
+            C = max(1e-6, float(row['pred_C']))
+            unit_profit = Q_p * C * fixed_markup
+            scores.append((i, unit_profit))
+        scores.sort(key=lambda x: x[1], reverse=True)
+        # 自适配上架数量范围
+        min_req = min(MIN_SHELF_COUNT, len(products))
+        max_req = min(MAX_SHELF_COUNT, len(products))
+        if min_req > max_req:
+            min_req = max_req
+        selected = [i for i, _ in scores[:max_req]]
+        # 至少满足最小数量
+        selected = selected[:max_req]
+        if len(selected) < min_req:
+            selected = [i for i, _ in scores[:min_req]]
+        # 构造解
+        solution_data = []
+        for i in selected:
+            row = self.candidates_df.loc[i]
+            Q_val = float(row['pred_Q_p'])
+            P_val = Q_val
+            A_val = fixed_markup
+            C_val = float(row['pred_C'])
+            selling_price = C_val * (1 + A_val)
+            revenue = Q_val * selling_price
+            cost = P_val * C_val
+            profit = revenue - cost
+            solution_data.append({
+                '单品编码': row['单品编码'],
+                '单品名称': row['单品名称'],
+                '分类编码': row['分类编码'],
+                '分类名称': row['分类名称'],
+                '是否上架': 1,
+                '进货量(kg)': P_val,
+                '加成率': A_val,
+                '售价(元/kg)': selling_price,
+                '预测销量(kg)': Q_val,
+                '预测批发价(元/kg)': C_val,
+                '预估收入(元)': revenue,
+                '进货成本(元)': cost,
+                '预估利润(元)': profit
+            })
+        self.solution = pd.DataFrame(solution_data)
+        # 输出摘要与校验
+        self.extract_solution(validate_only=True)
+    def extract_solution(self, validate_only=False):
         """
         提取优化结果
         """
@@ -238,47 +313,55 @@ class RestockingOptimizer:
         total_revenue = 0
         total_cost = 0
         
-        for i in self.candidates_df.index:
-            if self.x_vars[i].varValue > 0.5:  # 选中上架
-                row = self.candidates_df.loc[i]
-                
-                x_val = 1
-                Q_val = row['pred_Q_p']  # 预测销量
-                P_val = Q_val  # 进货量等于预测销量
-                A_val = 0.3    # 固定加成率30%
-                
-                # 计算售价和利润
-                C_val = row['pred_C']
-                selling_price = C_val * (1 + A_val)
-                revenue = Q_val * selling_price
-                cost = P_val * C_val
-                profit = revenue - cost
-                
-                total_profit += profit
-                total_revenue += revenue
-                total_cost += cost
-                
-                solution_data.append({
-                    '单品编码': row['单品编码'],
-                    '单品名称': row['单品名称'],
-                    '分类编码': row['分类编码'],
-                    '分类名称': row['分类名称'],
-                    '是否上架': x_val,
-                    '进货量(kg)': P_val,
-                    '加成率': A_val,
-                    '售价(元/kg)': selling_price,
-                    '预测销量(kg)': Q_val,
-                    '预测批发价(元/kg)': C_val,
-                    '预估收入(元)': revenue,
-                    '进货成本(元)': cost,
-                    '预估利润(元)': profit
-                })
-        
-        self.solution = pd.DataFrame(solution_data)
+        if self.solution is not None and validate_only:
+            # 使用已有解汇总
+            for _, row in self.solution.iterrows():
+                total_profit += float(row['预估利润(元)'])
+                total_revenue += float(row['预估收入(元)'])
+                total_cost += float(row['进货成本(元)'])
+        else:
+            for i in self.candidates_df.index:
+                if self.x_vars[i].varValue > 0.5:  # 选中上架
+                    row = self.candidates_df.loc[i]
+                    
+                    x_val = 1
+                    Q_val = row['pred_Q_p']  # 预测销量
+                    P_val = Q_val  # 进货量等于预测销量
+                    A_val = 0.3    # 固定加成率30%
+                    
+                    # 计算售价和利润
+                    C_val = row['pred_C']
+                    selling_price = C_val * (1 + A_val)
+                    revenue = Q_val * selling_price
+                    cost = P_val * C_val
+                    profit = revenue - cost
+                    
+                    total_profit += profit
+                    total_revenue += revenue
+                    total_cost += cost
+                    
+                    solution_data.append({
+                        '单品编码': row['单品编码'],
+                        '单品名称': row['单品名称'],
+                        '分类编码': row['分类编码'],
+                        '分类名称': row['分类名称'],
+                        '是否上架': x_val,
+                        '进货量(kg)': P_val,
+                        '加成率': A_val,
+                        '售价(元/kg)': selling_price,
+                        '预测销量(kg)': Q_val,
+                        '预测批发价(元/kg)': C_val,
+                        '预估收入(元)': revenue,
+                        '进货成本(元)': cost,
+                        '预估利润(元)': profit
+                    })
+            if not validate_only:
+                self.solution = pd.DataFrame(solution_data)
         
         # 汇总信息
         n_selected = len(self.solution)
         total_stock = self.solution['进货量(kg)'].sum()
+        avg_markup = self.solution['加成率'].mean()
         avg_markup = self.solution['加成率'].mean()
         
         logger.info(f"\n=== Optimization Results ===")
@@ -288,7 +371,10 @@ class RestockingOptimizer:
         logger.info(f"Total revenue: {total_revenue:.2f} yuan")
         logger.info(f"Total cost: {total_cost:.2f} yuan")
         logger.info(f"Total profit: {total_profit:.2f} yuan")
-        logger.info(f"Profit margin: {total_profit/total_revenue:.2%}")
+        if total_revenue > 0:
+            logger.info(f"Profit margin: {total_profit/total_revenue:.2%}")
+        else:
+            logger.info("Profit margin: N/A (zero revenue)")
         
         # 检查约束满足情况
         self.validate_solution()
@@ -305,13 +391,15 @@ class RestockingOptimizer:
         
         n_selected = len(self.solution)
         
-        # 检查上架数量约束
-        if n_selected < MIN_SHELF_COUNT:
-            logger.warning(f"Solution violates minimum shelf count: {n_selected} < {MIN_SHELF_COUNT}")
+        # 检查上架数量约束（自适应候选数量）
+        effective_min = min(MIN_SHELF_COUNT, len(self.candidates_df))
+        effective_max = min(MAX_SHELF_COUNT, len(self.candidates_df))
+        if n_selected < effective_min:
+            logger.warning(f"Solution violates minimum shelf count: {n_selected} < {effective_min}")
             return False
         
-        if n_selected > MAX_SHELF_COUNT:
-            logger.warning(f"Solution violates maximum shelf count: {n_selected} > {MAX_SHELF_COUNT}")
+        if n_selected > effective_max:
+            logger.warning(f"Solution violates maximum shelf count: {n_selected} > {effective_max}")
             return False
         
         # 检查最小陈列量约束

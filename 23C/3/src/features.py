@@ -160,6 +160,9 @@ def add_weekend_features(df):
     df_weekend_stats.columns = ['单品编码', 'day_of_week', 'dow_sales_mean', 'dow_sales_std', 'dow_count']
     df_weekend_stats['dow_sales_std'] = df_weekend_stats['dow_sales_std'].fillna(0)
     
+    # 为避免重复合并导致后缀，先移除已有列再合并
+    cols_to_drop = ['dow_sales_mean', 'dow_sales_std', 'dow_count']
+    df = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
     # 合并周几统计
     df = df.merge(df_weekend_stats, on=['单品编码', 'day_of_week'], how='left')
     
@@ -190,6 +193,10 @@ def add_category_features(df):
     ]).reset_index()
     category_stats.columns = ['分类编码', 'category_sales_mean', 'category_sales_std', 'category_sales_median']
     category_stats['category_sales_std'] = category_stats['category_sales_std'].fillna(0)
+    
+    # 为避免重复合并导致的后缀问题，先移除已有的品类统计列
+    cols_to_drop = ['category_sales_mean', 'category_sales_std', 'category_sales_median']
+    df = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
     
     df = df.merge(category_stats, on='分类编码', how='left')
     

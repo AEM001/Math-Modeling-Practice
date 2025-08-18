@@ -8,8 +8,34 @@ import seaborn as sns
 import logging
 from config import OUTPUT_PATHS
 
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
+# 设置中文字体（根据系统可用字体动态选择）
+import matplotlib
+from matplotlib import font_manager
+
+preferred_fonts = [
+    'PingFang SC',       # macOS 默认中文字体
+    'Heiti TC', 'Heiti SC',
+    'Songti SC', 'STHeiti',
+    'Microsoft YaHei',   # Windows 常见中文字体
+    'SimHei',            # 黑体
+    'Arial Unicode MS',  # 跨平台 Unicode 字体
+    'DejaVu Sans'        # 常见开源字体，部分中文支持
+]
+
+available_fonts = set(f.name for f in font_manager.fontManager.ttflist)
+selected_font = None
+for fname in preferred_fonts:
+    if fname in available_fonts:
+        selected_font = fname
+        break
+
+if selected_font is None:
+    # 回退：不更改font.sans-serif，依赖系统默认字体
+    logger = logging.getLogger(__name__)
+    logger.warning("No preferred Chinese font found; charts may not render Chinese properly.")
+else:
+    plt.rcParams['font.sans-serif'] = [selected_font]
+
 plt.rcParams['axes.unicode_minus'] = False
 
 logging.basicConfig(level=logging.INFO)
@@ -363,8 +389,22 @@ def plot_optimization_summary(summary, save_path=None):
     if 'category_distribution' in summary and summary['category_distribution']:
         category_dist = summary['category_distribution']
         if isinstance(category_dist, dict):
+            # 兼容两类结构：
+            # 1) {'品类名称': 计数}
+            # 2) {'预估利润(元)': {'品类名称': 值}, '预测销量(kg)': {...}, '售价(元/kg)': {...}}
+            first_val = next(iter(category_dist.values()))
+            if isinstance(first_val, dict):
+                # 使用利润占比作为可视化依据
+                profit_by_cat = category_dist.get('预估利润(元)', {})
+                if not profit_by_cat:
+                    # 回退：若无利润信息，则使用任意一个指标的键作为存在性分布
+                    some_metric = next(iter(category_dist.values()))
+                    profit_by_cat = {k: 1 for k in some_metric.keys()}
+                data_map = profit_by_cat
+            else:
+                data_map = category_dist
             # 只显示前6个品类
-            top_categories = dict(sorted(category_dist.items(), key=lambda x: x[1], reverse=True)[:6])
+            top_categories = dict(sorted(data_map.items(), key=lambda x: x[1], reverse=True)[:6])
             
             wedges, texts, autotexts = axes[1, 1].pie(top_categories.values(), 
                                                      labels=list(top_categories.keys()),

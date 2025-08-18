@@ -158,7 +158,7 @@ def run_screening(forecast_df, historical_df, args):
         'min_sales': MIN_DISPLAY_QTY,
         'max_candidates': args.max_candidates,
         'min_quality': QUALITY_THRESHOLDS['min_r2_score'],
-        'ensure_diversity': True
+        'ensure_diversity': False
     }
     
     candidates_df = screen_candidates(forecast_df, historical_df, screening_config)
