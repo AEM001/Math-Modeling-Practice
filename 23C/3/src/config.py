@@ -70,6 +70,6 @@ FEATURE_COLUMNS = {
 }
 
 QUALITY_THRESHOLDS = {
-    'min_r2_score': 0.1,  # 最小R²分数阈值
+    'min_r2_score': 0.5,  # 最小R²分数阈值
     'min_days_history': 7  # 最少历史天数
 }
