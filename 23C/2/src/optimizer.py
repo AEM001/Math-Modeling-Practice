@@ -40,15 +40,37 @@ class VegetableOptimizer:
             results_path = os.path.join(self.output_paths['results_dir'], 'demand_model_results.csv')
             models_df = pd.read_csv(results_path)
             
-            # 选择最佳模型（is_best=True）
-            best_models = models_df[models_df['is_best'] == True]
+            # 获取每个品类的最佳模型和弹性信息
+            categories = models_df['category'].unique()
             
-            for _, row in best_models.iterrows():
-                if pd.notna(row['test_r2']) and row['test_r2'] > 0:
-                    self.demand_models[row['category']] = {
-                        'model_type': row['model'],
-                        'price_elasticity': row['price_elasticity'] if pd.notna(row['price_elasticity']) else -0.5,
-                        'test_r2': row['test_r2']
+            for category in categories:
+                category_models = models_df[models_df['category'] == category]
+                
+                # 选择最佳模型（is_best=True）
+                best_model = category_models[category_models['is_best'] == True].iloc[0]
+                
+                # 如果最佳模型没有弹性值（如RandomForest），就使用LinearRegression的弹性
+                elasticity = best_model['price_elasticity']
+                if pd.isna(elasticity):
+                    # 查找线性模型的弹性
+                    linear_models = category_models[category_models['model'] == 'LinearRegression']
+                    if len(linear_models) > 0 and pd.notna(linear_models.iloc[0]['price_elasticity']):
+                        elasticity = linear_models.iloc[0]['price_elasticity']
+                        print(f"  {category}: 使用LinearRegression的弹性值 {elasticity:.3f}")
+                    else:
+                        # 使用基于品类的默认弹性
+                        category_elasticity_map = {
+                            '花叶类': -0.8, '辣椒类': -0.6, '花菜类': -1.2, 
+                            '食用菌': -0.4, '茄类': -0.9, '水生根茎类': -1.0
+                        }
+                        elasticity = category_elasticity_map.get(category, -0.8)
+                        print(f"  {category}: 使用默认弹性值 {elasticity:.3f}")
+                
+                if pd.notna(best_model['test_r2']) and best_model['test_r2'] > 0:
+                    self.demand_models[category] = {
+                        'model_type': best_model['model'],
+                        'price_elasticity': elasticity,
+                        'test_r2': best_model['test_r2']
                     }
             
             print(f"已加载 {len(self.demand_models)} 个品类的需求模型")
@@ -57,9 +79,9 @@ class VegetableOptimizer:
                 
         except Exception as e:
             print(f"加载需求模型失败: {e}")
-            # 使用默认弹性
+            # 使用更差异化的默认弹性
             categories = ['花叶类', '辣椒类', '花菜类', '食用菌', '茄类', '水生根茎类']
-            default_elasticities = [-0.5, -0.6, -0.4, -0.3, -0.7, -0.8]
+            default_elasticities = [-0.8, -0.6, -1.2, -0.4, -0.9, -1.0]
             
             for cat, elasticity in zip(categories, default_elasticities):
                 self.demand_models[cat] = {
@@ -125,9 +147,10 @@ class VegetableOptimizer:
             # 成本
             cost = quantity * wholesale_cost
             
-            # 减少缺货惩罚
+            # 增强缺货惩罚机制
             stockout = max(0, demand - actual_sales)
-            stockout_penalty = stockout * wholesale_cost * 0.05  # 使用批发价作为基准，降低惩罚
+            # 使用配置中的权重来增强缺货惩罚
+            stockout_penalty = stockout * wholesale_cost * 0.05 * self.opt_config['stockout_penalty_weight']
             
             # 净利润
             profit = revenue - cost - stockout_penalty
@@ -135,58 +158,168 @@ class VegetableOptimizer:
         
         return np.array(profits)
     
+    def calculate_theoretical_optimal_markup(self, elasticity):
+        """基于经济学理论计算最优加价率"""
+        # 先处理异常弹性值
+        if elasticity >= 0:  # 正弹性或零弹性不合理，使用默认负弹性
+            elasticity = self.opt_config.get('demand_elasticity_prior', -1.0)
+            print(f"    检测到非负弹性，使用默认弹性: {elasticity}")
+        
+        abs_elasticity = abs(elasticity)
+        
+        # 处理弹性值过小的情况
+        if abs_elasticity < 0.3:  # 弹性太小，使用先验弹性
+            abs_elasticity = abs(self.opt_config.get('demand_elasticity_prior', -1.0))
+            print(f"    弹性值过小，使用先验弹性: {abs_elasticity}")
+        
+        # 计算理论最优加价率，避免数值问题
+        if abs_elasticity > 1.05:  # 给出一些缓冲，避免接近零除
+            # 弹性大于1时，使用经典公式
+            theoretical_markup = abs_elasticity / (abs_elasticity - 1)
+        else:
+            # 弹性小于等于1时，使用简化公式：随弹性增大而加价减小
+            # 对于弹性=0.5，给出加价约1.6-1.7左右
+            # 对于弹性=1.0，给出加价约1.4-1.5左右
+            theoretical_markup = 1.3 + (1.0 - abs_elasticity) * 0.4
+        
+        # 限制在合理范围内
+        theoretical_markup = np.clip(theoretical_markup, 1.3, 2.2)
+        
+        return theoretical_markup
+    
+    def golden_section_search(self, category, wholesale_cost, base_quantity, a, b, tol=1e-3):
+        """黄金分割搜索最优加价率"""
+        # 黄金比例
+        phi = (1 + np.sqrt(5)) / 2
+        resphi = 2 - phi
+        
+        # 初始点
+        x1 = a + resphi * (b - a)
+        x2 = b - resphi * (b - a)
+        
+        # 计算初始函数值
+        f1 = -self.evaluate_markup_profit(category, wholesale_cost, base_quantity, x1)
+        f2 = -self.evaluate_markup_profit(category, wholesale_cost, base_quantity, x2)
+        
+        # 迭代搜索
+        for _ in range(self.opt_config.get('golden_section_iterations', 15)):
+            if f2 > f1:
+                b = x2
+                x2 = x1
+                f2 = f1
+                x1 = a + resphi * (b - a)
+                f1 = -self.evaluate_markup_profit(category, wholesale_cost, base_quantity, x1)
+            else:
+                a = x1
+                x1 = x2
+                f1 = f2
+                x2 = b - resphi * (b - a)
+                f2 = -self.evaluate_markup_profit(category, wholesale_cost, base_quantity, x2)
+            
+            # 收敛判断
+            if abs(b - a) < tol:
+                break
+        
+        return (a + b) / 2
+    
+    def evaluate_markup_profit(self, category, wholesale_cost, base_quantity, markup_ratio):
+        """评估给定加价率下的利润"""
+        price = wholesale_cost * markup_ratio
+        
+        # 预测需求
+        predicted_demand, _ = self.predict_demand(category, price, base_quantity)
+        
+        # 检查最低销量约束
+        min_sales = base_quantity * self.opt_config.get('min_service_sales_ratio', 0.7)
+        if predicted_demand < min_sales:
+            return -float('inf')  # 惩罚不满足最低销量约束的方案
+        
+        # 计算安全库存（基于服务水平和需求不确定性）
+        service_level = self.opt_config['service_level']
+        # 简化的安全系数映射
+        if service_level >= 0.95:
+            safety_factor = 1.65
+        elif service_level >= 0.90:
+            safety_factor = 1.28
+        elif service_level >= 0.80:
+            safety_factor = 0.84
+        else:
+            safety_factor = 0.50
+        
+        # 需求不确定性系数（简化处理）
+        uncertainty_cv = 0.15  # 15%的变异系数
+        test_quantity = predicted_demand * (1 + safety_factor * uncertainty_cv)
+        
+        # 计算期望利润
+        profit_scenarios = self.calculate_profit_scenarios(
+            category, price, test_quantity, wholesale_cost, base_quantity, 
+            n_scenarios=20
+        )
+        
+        expected_profit = np.mean(profit_scenarios)
+        profit_std = np.std(profit_scenarios)
+        
+        # 引入风险调整（简化的风险厌恶）
+        risk_penalty = 0.1 * profit_std  # 对高风险方案的小幅惩罚
+        risk_adjusted_profit = expected_profit - risk_penalty
+        
+        return risk_adjusted_profit
+    
     def optimize_category_heuristic(self, category, wholesale_cost, base_quantity):
-        """改进的启发式优化"""
+        """改进的启发式优化 - 使用闭式解锚点和黄金分割搜索"""
         if category not in self.demand_models:
-            optimal_price = wholesale_cost * 1.3
+            optimal_price = wholesale_cost * 1.7  # 使用区间中点作为默认
             optimal_quantity = base_quantity * 1.1
         else:
             model_info = self.demand_models[category]
-            elasticity = abs(model_info['price_elasticity'])
+            elasticity = model_info['price_elasticity']
             
-            # 连续加价率策略（在1.6-1.8区间内）
-            # 基于弹性进行连续调整
-            if elasticity > 0.7:  # 高弹性：相对较低加价
-                markup = 1.60 + (0.20 * 0.3)  # 1.66
-            elif elasticity > 0.5:  # 中等弹性
-                markup = 1.60 + (0.20 * 0.6)  # 1.72
-            else:  # 低弹性：相对较高加价
-                markup = 1.60 + (0.20 * 0.9)  # 1.78
+            # 计算理论最优加价率作为锚点
+            theoretical_markup = self.calculate_theoretical_optimal_markup(elasticity)
+            print(f"{category} 弹性={elasticity:.3f}, 理论最优加价率={theoretical_markup:.3f}")
             
-            # 限制在配置范围内
-            markup = np.clip(markup, self.opt_config['min_markup_ratio'], 
-                           self.opt_config['max_markup_ratio'])
+            # 设定搜索区间
+            min_markup = self.opt_config['min_markup_ratio']
+            max_markup = self.opt_config['max_markup_ratio']
             
-            optimal_price = wholesale_cost * markup
+            # 如果理论最优在区间内，以它为中心缩小搜索区间
+            if min_markup <= theoretical_markup <= max_markup:
+                # 在理论最优附近搜索
+                search_range = (max_markup - min_markup) * 0.3
+                search_min = max(min_markup, theoretical_markup - search_range)
+                search_max = min(max_markup, theoretical_markup + search_range)
+            else:
+                # 理论最优在区间外，搜索整个区间
+                search_min = min_markup
+                search_max = max_markup
             
-            # 基于多个定价选项的利润最优化
-            best_profit = -float('inf')
-            best_price = optimal_price
-            best_quantity = base_quantity
+            print(f"  搜索区间: [{search_min:.3f}, {search_max:.3f}]")
             
-            # 测试不同的价格点（在1.6-1.8区间内连续采样）
-            markup_samples = np.linspace(1.60, 1.80, 8)  # 在1.6-1.8区间内生成8个采样点
-            test_prices = [wholesale_cost * m for m in markup_samples]
-            test_prices = [p for p in test_prices if self.opt_config['min_markup_ratio'] * wholesale_cost <= p <= self.opt_config['max_markup_ratio'] * wholesale_cost]
+            # 使用黄金分割搜索找最优加价率
+            optimal_markup = self.golden_section_search(
+                category, wholesale_cost, base_quantity, search_min, search_max
+            )
             
-            for test_price in test_prices:
-                # 预测该价格下的需求
-                predicted_demand, _ = self.predict_demand(category, test_price, base_quantity)
-                test_quantity = predicted_demand * 1.15  # 安全库存
-                
-                # 计算预期利润
-                profit_scenarios = self.calculate_profit_scenarios(
-                    category, test_price, test_quantity, wholesale_cost, base_quantity, n_scenarios=10
-                )
-                avg_profit = np.mean(profit_scenarios)
-                
-                if avg_profit > best_profit:
-                    best_profit = avg_profit
-                    best_price = test_price
-                    best_quantity = test_quantity
+            print(f"  最终选择加价率: {optimal_markup:.3f}")
             
-            optimal_price = best_price
-            optimal_quantity = best_quantity
+            optimal_price = wholesale_cost * optimal_markup
+            
+            # 计算最优数量
+            predicted_demand, _ = self.predict_demand(category, optimal_price, base_quantity)
+            service_level = self.opt_config['service_level']
+            
+            # 安全库存计算
+            if service_level >= 0.95:
+                safety_factor = 1.65
+            elif service_level >= 0.90:
+                safety_factor = 1.28
+            elif service_level >= 0.80:
+                safety_factor = 0.84
+            else:
+                safety_factor = 0.50
+            
+            uncertainty_cv = 0.15
+            optimal_quantity = predicted_demand * (1 + safety_factor * uncertainty_cv)
         
         # 确保最小值
         optimal_quantity = max(optimal_quantity, base_quantity * 0.7)

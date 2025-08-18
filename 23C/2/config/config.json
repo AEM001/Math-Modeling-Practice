@@ -38,9 +38,12 @@
     "max_daily_price_change": 0.1,
     "price_smoothing_weight": 0.1,
     "quantity_smoothing_weight": 0.05,
-    "stockout_penalty_weight": 2.0,
+    "stockout_penalty_weight": 8.0,
     "wastage_penalty_weight": 0.5,
-    "monte_carlo_samples": 50
+    "monte_carlo_samples": 50,
+    "min_service_sales_ratio": 0.7,
+    "demand_elasticity_prior": -1.0,
+    "golden_section_iterations": 15
   },
   "backtesting": {
     "min_train_days": 30,
