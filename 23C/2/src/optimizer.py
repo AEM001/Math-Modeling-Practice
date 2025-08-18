@@ -144,13 +144,14 @@ class VegetableOptimizer:
             model_info = self.demand_models[category]
             elasticity = abs(model_info['price_elasticity'])
             
-            # 更稳定的定价策略（减少随机性）
-            if elasticity > 0.7:  # 高弹性：薄利多销
-                markup = 1.20
+            # 连续加价率策略（在1.6-1.8区间内）
+            # 基于弹性进行连续调整
+            if elasticity > 0.7:  # 高弹性：相对较低加价
+                markup = 1.60 + (0.20 * 0.3)  # 1.66
             elif elasticity > 0.5:  # 中等弹性
-                markup = 1.35
-            else:  # 低弹性：可以高加成
-                markup = 1.50
+                markup = 1.60 + (0.20 * 0.6)  # 1.72
+            else:  # 低弹性：相对较高加价
+                markup = 1.60 + (0.20 * 0.9)  # 1.78
             
             # 限制在配置范围内
             markup = np.clip(markup, self.opt_config['min_markup_ratio'], 
@@ -163,8 +164,9 @@ class VegetableOptimizer:
             best_price = optimal_price
             best_quantity = base_quantity
             
-            # 测试不同的价格点
-            test_prices = [wholesale_cost * m for m in [1.15, 1.25, 1.35, 1.45, 1.55]]
+            # 测试不同的价格点（在1.6-1.8区间内连续采样）
+            markup_samples = np.linspace(1.60, 1.80, 8)  # 在1.6-1.8区间内生成8个采样点
+            test_prices = [wholesale_cost * m for m in markup_samples]
             test_prices = [p for p in test_prices if self.opt_config['min_markup_ratio'] * wholesale_cost <= p <= self.opt_config['max_markup_ratio'] * wholesale_cost]
             
             for test_price in test_prices:
@@ -382,8 +384,8 @@ class VegetableOptimizer:
                 base_quantity = base_quantities.get(category, 15.0)
                 wholesale_cost = base_wholesale_prices.get(category, 8.0)
                 
-                # 生成价格区间（基于加成率）
-                markup_ratios = np.linspace(1.1, 2.0, 20)
+                # 生成价格区间（聚焦在1.6-1.8加成率）
+                markup_ratios = np.linspace(1.6, 1.8, 20)
                 prices = wholesale_cost * markup_ratios
                 
                 quantities = []

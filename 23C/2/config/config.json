@@ -33,8 +33,8 @@
   "optimization": {
     "optimization_horizon": 7,
     "service_level": 0.8,
-    "min_markup_ratio": 1.05,
-    "max_markup_ratio": 2.5,
+    "min_markup_ratio": 1.6,
+    "max_markup_ratio": 1.8,
     "max_daily_price_change": 0.1,
     "price_smoothing_weight": 0.1,
     "quantity_smoothing_weight": 0.05,
