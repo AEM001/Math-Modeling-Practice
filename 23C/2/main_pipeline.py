@@ -95,14 +95,34 @@ class VegetablePricingPipeline:
         try:
             start_time = datetime.now()
             modeler = DemandModeler(self.config_path)
-            success = modeler.run_modeling()
-            duration = (datetime.now() - start_time).total_seconds()
             
-            if success:
-                self.log_execution("需求建模", "success", "模型训练完成", duration)
-                return True
+            # run_modeling方法没有返回值，我们检查结果文件是否生成
+            modeler.run_modeling()
+            
+            # 检查是否生成了结果文件
+            results_path = os.path.join(modeler.output_paths['results_dir'], 'demand_model_results.csv')
+            
+            if os.path.exists(results_path):
+                # 检查文件是否为空
+                import pandas as pd
+                try:
+                    results_df = pd.read_csv(results_path)
+                    
+                    # 添加is_best列（所有模型都标记为最佳，因为每个品类只有一个模型）
+                    results_df['is_best'] = True
+                    results_df.to_csv(results_path, index=False, encoding='utf-8')
+                    
+                    model_count = len(results_df)
+                    
+                    duration = (datetime.now() - start_time).total_seconds()
+                    self.log_execution("需求建模", "success", f"模型训练完成，生成了{model_count}个模型", duration)
+                    return True
+                except Exception as e:
+                    self.log_execution("需求建模", "error", f"结果文件错误: {str(e)}")
+                    return False
             else:
-                self.log_execution("需求建模", "error", "需求建模失败", duration)
+                duration = (datetime.now() - start_time).total_seconds()
+                self.log_execution("需求建模", "error", "没有生成模型结果文件", duration)
                 return False
                 
         except Exception as e:
@@ -114,15 +134,47 @@ class VegetablePricingPipeline:
         try:
             start_time = datetime.now()
             optimizer = VegetableOptimizer(self.config_path)
-            success = optimizer.run_optimization()
-            duration = (datetime.now() - start_time).total_seconds()
             
-            if success:
-                self.log_execution("优化算法", "success", "策略优化完成", duration)
-                return True
-            else:
-                self.log_execution("优化算法", "error", "优化算法失败", duration)
+            # 加载需求模型
+            optimizer.load_demand_models()
+            
+            if not optimizer.demand_models:
+                self.log_execution("优化算法", "error", "没有加载到需求模型")
                 return False
+            
+            # 运行优化
+            results_df = optimizer.run_daily_optimization()
+            
+            if results_df.empty:
+                self.log_execution("优化算法", "error", "优化结果为空")
+                return False
+            
+            # 保存结果
+            optimizer.save_optimization_results(results_df)
+            
+            # 生成周策略汇总
+            weekly_summary = results_df.groupby('category').agg({
+                'wholesale_cost': 'mean',
+                'optimal_price': 'mean', 
+                'optimal_quantity': 'mean',
+                'expected_profit': 'sum'
+            }).reset_index()
+            
+            weekly_summary.columns = ['category', 'avg_wholesale_cost', 'avg_optimal_price', 'avg_optimal_quantity', 'total_expected_profit']
+            weekly_summary['profit_margin'] = (weekly_summary['avg_optimal_price'] - weekly_summary['avg_wholesale_cost']) / weekly_summary['avg_wholesale_cost']
+            
+            # 保存周策略
+            import os
+            # 保存到项目根目录下的标准输出路径（而不是相对config目录）
+            project_root = os.path.abspath(os.path.dirname(__file__))
+            results_dir = os.path.join(project_root, self.config['output_paths']['results_dir'])
+            os.makedirs(results_dir, exist_ok=True)
+            weekly_path = os.path.join(results_dir, 'weekly_strategy.csv')
+            weekly_summary.to_csv(weekly_path, index=False, encoding='utf-8-sig')
+            
+            duration = (datetime.now() - start_time).total_seconds()
+            self.log_execution("优化算法", "success", f"策略优化完成，生成了{len(results_df)}条优化结果", duration)
+            return True
                 
         except Exception as e:
             self.log_execution("优化算法", "error", f"执行异常: {str(e)}")

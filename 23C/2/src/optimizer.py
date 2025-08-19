@@ -38,6 +38,28 @@ class VegetableOptimizer:
         self.demand_models = {}
         # Store the start date from training to calculate time trend
         self.time_series_start_date = pd.to_datetime(self.config['time_series_start_date'])
+        # Denominator used to normalize time_trend, aligned with training data span
+        self.time_trend_denominator = 365
+        # Try to align time trend scaling with FeatureEngineer outputs
+        self._init_time_trend_scaler()
+
+    def _init_time_trend_scaler(self):
+        """Initialize time trend normalization using the training feature file if available."""
+        try:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            train_feat_rel = self.config.get('data_paths', {}).get('train_features')
+            if not train_feat_rel:
+                return
+            train_feat_path = os.path.join(project_root, train_feat_rel)
+            if os.path.exists(train_feat_path):
+                df = pd.read_csv(train_feat_path, parse_dates=['销售日期'])
+                min_dt = pd.to_datetime(df['销售日期']).min()
+                max_dt = pd.to_datetime(df['销售日期']).max()
+                if pd.notnull(min_dt) and pd.notnull(max_dt) and max_dt > min_dt:
+                    self.time_series_start_date = min_dt
+                    self.time_trend_denominator = max(1, (max_dt - min_dt).days)
+        except Exception as e:
+            print(f"Warning: failed to initialize time_trend scaler: {e}")
     
     def load_demand_models(self):
         """Loads the fitted SARIMAX models and their metadata."""
@@ -90,27 +112,66 @@ class VegetableOptimizer:
         if 'is_weekend' in features:
             exog_data['is_weekend'] = 1 if date.dayofweek >= 5 else 0
         if 'time_trend' in features:
-            # Calculate days since the start of the entire dataset for time trend
-            exog_data['time_trend'] = (date - self.time_series_start_date).days
+            # Calculate days since the (training) start date and normalize with the same span as training
+            days_since_start = max(0, (date - self.time_series_start_date).days)
+            denom = max(1, getattr(self, 'time_trend_denominator', 365))
+            exog_data['time_trend'] = min(days_since_start / denom, 1.0)
         # Add other potential features if they were used in training
         # This part needs to be perfectly aligned with feature_engineer.py
 
         # Ensure the columns are in the same order as during training
         exog_data = exog_data[features]
+        # Ensure numeric dtype
+        exog_data = exog_data.astype(float)
 
         # 2. Predict using the model
         try:
-            # The model predicts ln_quantity, so we need to exponentiate the result
-            ln_demand_pred = model.predict(n_periods=1, exogenous=exog_data)[0]
-            predicted_demand = np.exp(ln_demand_pred)
+            # Use predict with confidence interval for uncertainty estimation
+            try:
+                ln_pred, conf_int = model.predict(n_periods=1, exogenous=exog_data, return_conf_int=True)
+            except TypeError:
+                # Fallback for versions expecting X keyword
+                ln_pred, conf_int = model.predict(n_periods=1, X=exog_data, return_conf_int=True)
+
+            ln_pred_arr = np.asarray(ln_pred).reshape(-1)
+            if ln_pred_arr.size < 1:
+                raise ValueError("empty prediction array")
+            ln_pred_val = float(ln_pred_arr[0])
+            if not np.isfinite(ln_pred_val):
+                raise ValueError(f"ln_pred not finite: {ln_pred_val}")
+            predicted_demand = float(np.exp(ln_pred_val))
+            
+            # Guard against numerical underflow/overflow
+            if not np.isfinite(predicted_demand) or predicted_demand <= 0:
+                print(f"ERROR predicting for {category} on {date}: Invalid prediction {predicted_demand}")
+                return 15.0, 15.0 * 0.5
+                
         except Exception as e:
             print(f"ERROR predicting for {category} on {date}: {e}")
             return 15.0, 15.0 * 0.5 # Fallback on error
 
         # 3. Estimate uncertainty
-        # A simple way is to use the model's R^2 score
-        uncertainty_factor = np.sqrt(1 - max(0, model_info.get('test_r2', 0.5))) # Use R2 to estimate std dev
-        demand_std = predicted_demand * uncertainty_factor * 0.5 # Scale it down
+        demand_std = None
+        try:
+            # If confidence interval was returned, approximate std from it on log-scale
+            ci_arr = np.asarray(conf_int)
+            # Handle shapes: (2,) or (1,2) or DataFrame-like
+            if ci_arr.ndim == 1 and ci_arr.size == 2:
+                ln_lower, ln_upper = float(ci_arr[0]), float(ci_arr[1])
+            else:
+                ln_lower, ln_upper = float(ci_arr[0, 0]), float(ci_arr[0, 1])
+            ln_width = max(0.0, ln_upper - ln_lower)
+            # 95% CI width ≈ 3.92 * sigma
+            ln_sigma = max(ln_width / 3.92, 1e-6)
+            # Delta method: std(Y) ≈ Y * sigma when Y = exp(X)
+            demand_std = max(predicted_demand * ln_sigma, predicted_demand * 0.05)
+        except Exception:
+            pass
+
+        if demand_std is None or not np.isfinite(demand_std) or demand_std <= 0:
+            # Fallback: derive a conservative std from test R^2
+            uncertainty_factor = np.sqrt(1 - max(0, model_info.get('test_r2', 0.5)))
+            demand_std = max(predicted_demand * uncertainty_factor * 0.5, predicted_demand * 0.05)
         
         return predicted_demand, demand_std
     

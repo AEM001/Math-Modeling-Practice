@@ -77,6 +77,10 @@ class Visualizer:
                 return None
                 
             df = pd.read_csv(results_path)
+            # 兼容缺失列（例如：没有'model'或'train_r2'）
+            if 'model' not in df.columns:
+                df['model'] = 'SARIMAX'
+            has_train_r2 = 'train_r2' in df.columns
             
             # 创建子图
             fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -140,28 +144,34 @@ class Visualizer:
                         transform=ax3.transAxes, fontsize=14)
                 ax3.set_title('各品类价格弹性', fontweight='bold')
             
-            # 4. 训练vs测试性能散点图
+            # 4. 训练vs测试性能散点图（若无train_r2则回退为测试R²分布）
             ax4 = axes[1, 1]
-            train_r2 = df['train_r2']
-            test_r2 = df['test_r2']
-            
-            # 按模型类型着色
-            models = df['model'].unique()
-            colors = plt.cm.Set3(np.linspace(0, 1, len(models)))
-            
-            for i, model in enumerate(models):
-                model_data = df[df['model'] == model]
-                ax4.scatter(model_data['train_r2'], model_data['test_r2'], 
-                           c=[colors[i]], label=model, alpha=0.7, s=60)
-            
-            # 添加对角线（理想情况）
-            max_val = max(train_r2.max(), test_r2.max())
-            ax4.plot([0, max_val], [0, max_val], 'k--', alpha=0.5, label='理想线')
-            
-            ax4.set_title('训练vs测试性能', fontweight='bold')
-            ax4.set_xlabel('训练R²')
-            ax4.set_ylabel('测试R²')
-            ax4.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            if has_train_r2:
+                train_r2 = df['train_r2']
+                test_r2 = df['test_r2']
+                
+                # 按模型类型着色
+                models = df['model'].unique()
+                colors = plt.cm.Set3(np.linspace(0, 1, len(models)))
+                
+                for i, model in enumerate(models):
+                    model_data = df[df['model'] == model]
+                    ax4.scatter(model_data['train_r2'], model_data['test_r2'], 
+                               c=[colors[i]], label=model, alpha=0.7, s=60)
+                
+                # 添加对角线（理想情况）
+                max_val = max(train_r2.max(), test_r2.max())
+                ax4.plot([0, max_val], [0, max_val], 'k--', alpha=0.5, label='理想线')
+                
+                ax4.set_title('训练vs测试性能', fontweight='bold')
+                ax4.set_xlabel('训练R²')
+                ax4.set_ylabel('测试R²')
+                ax4.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            else:
+                ax4.hist(df['test_r2'].dropna(), bins=10, color='gray', alpha=0.7, edgecolor='black')
+                ax4.set_title('测试R²分布', fontweight='bold')
+                ax4.set_xlabel('测试R²')
+                ax4.set_ylabel('频数')
             
             # 调整布局
             plt.tight_layout()
@@ -216,6 +226,7 @@ class Visualizer:
             
             # 2. 各品类加成率分析
             ax2 = axes[0, 1]
+            df_daily['markup_ratio'] = df_daily['optimal_price'] / df_daily['wholesale_cost']
             avg_markup = df_daily.groupby('category')['markup_ratio'].mean()
             
             bars2 = ax2.bar(avg_markup.index, avg_markup.values, 
@@ -369,16 +380,16 @@ class Visualizer:
             results_path = os.path.join(self.output_paths['results_dir'], 'demand_model_results.csv')
             if os.path.exists(results_path):
                 df = pd.read_csv(results_path)
-                best_models = df[df['is_best'] == True]
+                best_models = df[df['is_best'] == True] if 'is_best' in df.columns else df
                 avg_r2 = best_models['test_r2'].mean()
+                feature_count = len(self.config.get('sarimax_exog_features', []))
                 
                 performance_text = f"""
 模型性能汇总:
 • 建模品类: {len(best_models)} 个
 • 平均测试R²: {avg_r2:.3f}
-• 最佳算法: RandomForest
-• 交叉验证: 3折时间序列CV
-• 特征数量: 28 个
+• 最佳算法: SARIMAX
+• 特征数量: {feature_count} 个
                 """
                 ax.text(0.05, 0.95, performance_text, transform=ax.transAxes,
                        fontsize=12, verticalalignment='top',
@@ -400,7 +411,8 @@ class Visualizer:
             results_path = os.path.join(self.output_paths['results_dir'], 'optimization_results.csv')
             if os.path.exists(results_path):
                 df = pd.read_csv(results_path)
-                avg_markup = df['markup_ratio'].mean()
+                # 计算加成率：优化价格/批发成本
+                avg_markup = (df['optimal_price'] / df['wholesale_cost']).mean()
                 total_profit = df['expected_profit'].sum()
                 
                 opt_text = f"""
@@ -459,7 +471,10 @@ class Visualizer:
                 x_pos = np.arange(len(categories))
                 
                 # 多指标对比（标准化）
-                avg_prices = df['avg_weekly_price'] / df['avg_weekly_price'].max()
+                # 使用实际列名
+                avg_prices = df['avg_optimal_price'] / df['avg_optimal_price'].max()
+                # 计算加成率
+                df['avg_markup_ratio'] = df['avg_optimal_price'] / df['avg_wholesale_cost']
                 avg_markups = df['avg_markup_ratio'] / df['avg_markup_ratio'].max()  
                 profits = df['total_expected_profit'] / df['total_expected_profit'].max()
                 
