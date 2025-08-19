@@ -1,8 +1,3 @@
-"""
-优化结果报告生成模块
-生成详细的策略分析报告
-"""
-
 import pandas as pd
 import numpy as np
 import json

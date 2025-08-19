@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-蔬菜定价与补货策略分析管道 - 精简版
-整合所有分析模块，提供统一的执行接口
-"""
-
 import os
 import sys
 import json
