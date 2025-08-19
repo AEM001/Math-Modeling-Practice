@@ -11,7 +11,8 @@
   "output_paths": {
     "reports_dir": "reports",
     "figures_dir": "outputs/figures",
-    "results_dir": "outputs/results"
+    "results_dir": "outputs/results",
+    "model_dir": "outputs/models"
   },
   "data_cleaning": {
     "outlier_threshold": 3.0,
@@ -29,6 +30,17 @@
     "cv_folds": 3,
     "random_state": 42,
     "models_to_test": ["LinearRegression", "HuberRegressor", "RandomForest", "GradientBoosting"]
+  },
+  "target_variable": "ln_quantity",
+  "sarimax_exog_features": ["ln_price", "is_weekend", "time_trend"],
+  "time_series_start_date": "2020-07-01",
+  "base_wholesale_prices": {
+    "花叶类": 6.0,
+    "辣椒类": 18.0,
+    "花菜类": 14.0,
+    "食用菌": 14.0,
+    "茄类": 8.0,
+    "水生根茎类": 10.0
   },
   "optimization": {
     "optimization_horizon": 7,
