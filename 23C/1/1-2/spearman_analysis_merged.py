@@ -1,7 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-
 import pandas as pd
 import numpy as np
 from scipy import stats
@@ -160,11 +156,7 @@ class SpearmanAnalysis:
         return r_s, p_value, n
     
     def analyze_correlations(self, data_type='categories', min_samples=30, items_to_analyze=None):
-        """
-        分析相关性
-        data_type: 'categories' 或 'products'
-        items_to_analyze: 如果提供，则只分析这个列表中的项目
-        """
+
         if data_type == 'categories':
             data = self.category_pivot
             items = list(data.columns)

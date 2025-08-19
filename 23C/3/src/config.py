@@ -1,6 +1,3 @@
-"""
-Configuration file for the single product restocking and pricing optimization project.
-"""
 import os
 
 RANDOM_STATE = 2025

@@ -1,8 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-精简版数据质量审计与清洗模块
-"""
-
 import pandas as pd
 import numpy as np
 import json
@@ -12,7 +7,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class DataAuditor:
-    """精简版数据质量审计器"""
     
     def __init__(self, config_path='config/config.json'):
         """初始化审计器"""
@@ -32,6 +26,7 @@ class DataAuditor:
         print("正在加载数据...")
         
         # 加载原始数据
+        # Load original data
         data_path = self.data_paths['raw_item_data']
         raw_data = pd.read_csv(data_path)
         raw_data['销售日期'] = pd.to_datetime(raw_data['销售日期'])

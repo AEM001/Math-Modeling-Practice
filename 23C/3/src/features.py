@@ -1,6 +1,3 @@
-"""
-Feature engineering for sales and pricing prediction.
-"""
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta

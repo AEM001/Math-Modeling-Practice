@@ -1,6 +1,3 @@
-"""
-Visualization module for analysis results.
-"""
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,38 +5,44 @@ import seaborn as sns
 import logging
 from config import OUTPUT_PATHS
 
-# 设置中文字体（根据系统可用字体动态选择）
+
 import matplotlib
 from matplotlib import font_manager
 
-preferred_fonts = [
-    'PingFang SC',       # macOS 默认中文字体
-    'Heiti TC', 'Heiti SC',
-    'Songti SC', 'STHeiti',
-    'Microsoft YaHei',   # Windows 常见中文字体
-    'SimHei',            # 黑体
-    'Arial Unicode MS',  # 跨平台 Unicode 字体
-    'DejaVu Sans'        # 常见开源字体，部分中文支持
-]
-
-available_fonts = set(f.name for f in font_manager.fontManager.ttflist)
-selected_font = None
-for fname in preferred_fonts:
-    if fname in available_fonts:
-        selected_font = fname
-        break
-
-if selected_font is None:
-    # 回退：不更改font.sans-serif，依赖系统默认字体
+def ensure_chinese_font():
+    """Set a robust Chinese font fallback chain for Matplotlib on macOS/Windows/Linux."""
     logger = logging.getLogger(__name__)
-    logger.warning("No preferred Chinese font found; charts may not render Chinese properly.")
-else:
-    plt.rcParams['font.sans-serif'] = [selected_font]
+    preferred_fonts = [
+        'PingFang SC',        # macOS 默认中文字体
+        'Heiti SC', 'Heiti TC',
+        'Songti SC', 'STHeiti',
+        'Hiragino Sans GB',   # 一些 mac 机型可用
+        'Microsoft YaHei',    # Windows 常见中文字体
+        'SimHei',             # 黑体（常见中文字体）
+        'Noto Sans CJK SC',   # Noto 开源中文
+        'Arial Unicode MS',   # 跨平台 Unicode 字体
+        'DejaVu Sans'         # 开源字体（部分中文支持）
+    ]
 
-plt.rcParams['axes.unicode_minus'] = False
+    installed = set(f.name for f in font_manager.fontManager.ttflist)
+    available_chain = [f for f in preferred_fonts if f in installed]
+
+    if available_chain:
+        # 设定 sans-serif 家族，并提供回退链
+        plt.rcParams['font.family'] = ['sans-serif']
+        plt.rcParams['font.sans-serif'] = available_chain
+        logger.info(f"Using Chinese font fallback chain: {available_chain}")
+    else:
+        logger.warning("No preferred Chinese font found; charts may not render Chinese properly.")
+
+    # 解决坐标轴负号显示为方块的问题
+    plt.rcParams['axes.unicode_minus'] = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 配置中文字体（在日志系统就绪后执行，便于输出信息）
+ensure_chinese_font()
 
 def setup_plot_style():
     """

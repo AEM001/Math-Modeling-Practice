@@ -5,7 +5,6 @@ import re
 def clean_product_name(name):
    
     # 清理单品名称，去除数字编号（来源标识）
-    
    
     if pd.isna(name):
         return name
@@ -14,16 +13,6 @@ def clean_product_name(name):
     return cleaned_name
 
 def process_sales_data_by_item(info_xlsx_path, sales_xlsx_path):
-    """
-    处理销售数据，按照单品进行合并和聚合
-    
-    Args:
-        info_xlsx_path (str): 附件1（商品信息）的Excel文件路径
-        sales_xlsx_path (str): 附件2（销售流水）的Excel文件路径
-    
-    Returns:
-        DataFrame: 包含销售日期、单品名称、单品销量（天）、所属品类的数据表
-    """
     print("开始处理销售数据...")
     start_time = time.time()
 

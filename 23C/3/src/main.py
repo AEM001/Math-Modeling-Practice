@@ -1,17 +1,17 @@
 """
-Main pipeline entry point for single product restocking and pricing optimization.
+主要管道入口点，用于单品补货和定价优化。
 
-Usage:
-    python src/main.py [options]
+用法：
+    python src/main.py [选项]
 
-Options:
-    --date: Target date for optimization (default: 2023-07-01)
-    --data-dir: Data directory path (default: ./data)
-    --output-dir: Output directory path (default: ./outputs)
-    --use-elasticity: Use price elasticity model (default: False)
-    --solver: Optimization solver (default: CBC)
-    --quick-mode: Use quick baseline forecasting (default: False)
-    --no-viz: Skip visualization generation (default: False)
+选项：
+    --date: 优化目标日期 (默认: 2023-07-01)
+    --data-dir: 数据目录路径 (默认: ./data)
+    --output-dir: 输出目录路径 (默认: ./outputs)
+    --use-elasticity: 使用价格弹性模型 (默认: False)
+    --solver: 优化求解器 (默认: CBC)
+    --quick-mode: 使用快速基线预测 (默认: False)
+    --no-viz: 跳过可视化生成 (默认: False)
 """
 import sys
 import os

@@ -7,7 +7,7 @@ from scipy import stats
 
 warnings.filterwarnings('ignore')
 
-# 中文字体设置（尽最大努力兼容）
+# 中文字体设置
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -108,7 +108,7 @@ def ks_test_series(values: np.ndarray) -> dict:
 
 
 def plot_hist_with_fits(values: np.ndarray, title: str, out_path: str):
-    # 按需求暂不输出图片，函数保留占位
+    
     return
 
 

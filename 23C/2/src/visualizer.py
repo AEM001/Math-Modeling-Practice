@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-优化结果可视化模块
-生成策略分析图表和报告
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt

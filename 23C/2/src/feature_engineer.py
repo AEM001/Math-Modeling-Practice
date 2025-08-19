@@ -1,8 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-精简版特征工程模块
-"""
-
 import pandas as pd
 import numpy as np
 import json
@@ -12,7 +7,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class FeatureEngineer:
-    """精简版特征工程器"""
     
     def __init__(self, config_path='config/config.json'):
         """初始化特征工程器"""

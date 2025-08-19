@@ -1,6 +1,3 @@
-"""
-Optimization modeling and solving for restocking and pricing decisions.
-"""
 import pandas as pd
 import numpy as np
 import pulp
@@ -37,7 +34,7 @@ class RestockingOptimizer:
     
     def create_linear_model(self):
         """
-        创建极简化的线性优化模型
+        线性优化模型
         """
         logger.info("Creating simplified linear optimization model...")
         

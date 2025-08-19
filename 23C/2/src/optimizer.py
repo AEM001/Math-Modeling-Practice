@@ -1,8 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-精简版优化器模块
-"""
-
 import pandas as pd
 import numpy as np
 import json
@@ -17,10 +12,10 @@ import sys
 warnings.filterwarnings('ignore')
 
 # 导入字体配置
-# from font_config import setup_chinese_font # Temporarily disable for compatibility
+# from font_config import setup_chinese_font # 为了兼容性暂时禁用
 
 class VegetableOptimizer:
-    """精简版蔬菜定价与补货优化器"""
+    """蔬菜定价与补货优化器"""
     
     def __init__(self, config_path='config/config.json'):
         """初始化优化器"""
@@ -36,19 +31,19 @@ class VegetableOptimizer:
         }
         self.opt_config = self.config['optimization']
         self.demand_models = {}
-        # Global default wastage rate for ordering and simulation
+        # 订货与仿真的全局默认损耗率
         self.default_wastage_rate = float(self.opt_config.get('wastage_rate', 0.05))
-        # Store the start date from training to calculate time trend
+        # 保存训练数据中的起始日期以计算时间趋势
         self.time_series_start_date = pd.to_datetime(self.config['time_series_start_date'])
-        # Denominator used to normalize time_trend, aligned with training data span
+        # 用于归一化 time_trend 的分母，与训练数据跨度对齐
         self.time_trend_denominator = 365
-        # Try to align time trend scaling with FeatureEngineer outputs
+        # 尝试将时间趋势的缩放与特征工程输出保持一致
         self._init_time_trend_scaler()
-        # Initialize category baselines and caps from training features
+        # 从训练特征中初始化各品类的基准与需求上限
         self._init_category_baselines_and_caps()
 
     def _init_time_trend_scaler(self):
-        """Initialize time trend normalization using the training feature file if available."""
+        """若可用，则使用训练特征文件来初始化时间趋势的归一化。"""
         try:
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             train_feat_rel = self.config.get('data_paths', {}).get('train_features')
@@ -66,7 +61,7 @@ class VegetableOptimizer:
             print(f"Warning: failed to initialize time_trend scaler: {e}")
     
     def _init_category_baselines_and_caps(self):
-        """Compute per-category baseline ln_price and demand caps using training features."""
+        """基于训练特征，计算各品类的 ln_price 基准与需求上限。"""
         self.category_ln_price_ref = {}
         self.category_demand_cap = {}
         try:
@@ -81,10 +76,10 @@ class VegetableOptimizer:
             if '分类名称' not in df.columns:
                 return
             df['销售日期'] = pd.to_datetime(df['销售日期']) if '销售日期' in df.columns else pd.NaT
-            # Compute ln_price reference as mean per category
+            # 计算 ln_price 的参考值（各品类均值）
             grp = df.groupby('分类名称')['ln_price']
             self.category_ln_price_ref = grp.mean().to_dict()
-            # Aggregate to category-date quantity (sum of exp(ln_quantity))
+            # 聚合为“品类-日期”的销量（对 ln_quantity 取指数后求和）
             if 'ln_quantity' in df.columns:
                 df['quantity'] = np.exp(df['ln_quantity']).clip(lower=1e-6)
                 q = df.groupby(['分类名称', '销售日期'], as_index=False)['quantity'].sum()
@@ -95,7 +90,7 @@ class VegetableOptimizer:
             print(f"Warning: failed to initialize category baselines/caps: {e}")
     
     def load_demand_models(self):
-        """Loads the fitted RandomForest (or other) models and their metadata."""
+        """加载已训练的随机森林（或其他）模型及其元数据。"""
         print("Loading demand models...")
         model_dir = self.output_paths['model_dir']
         results_path = os.path.join(self.output_paths['results_dir'], 'demand_model_results.csv')
@@ -113,7 +108,7 @@ class VegetableOptimizer:
             if os.path.exists(model_path):
                 try:
                     model_obj = joblib.load(model_path)
-                    # Parse features used by the model if present in results
+                    # 若结果中包含，则解析模型实际使用的特征列表
                     features = default_features
                     if 'features' in row and pd.notna(row['features']):
                         raw = str(row['features'])
@@ -121,7 +116,7 @@ class VegetableOptimizer:
                             import json as _json
                             features = _json.loads(raw)
                         except Exception:
-                            # Fallback: strip brackets/quotes and split by comma
+                            # 退化处理：去除括号/引号并按逗号分割
                             raw2 = raw.strip().strip('[]')
                             parts = [p.strip().strip("'\"") for p in raw2.split(',') if p.strip()]
                             if parts:
@@ -130,7 +125,7 @@ class VegetableOptimizer:
                     self.demand_models[category] = {
                         'model_object': model_obj,
                         'price_elasticity': row['price_elasticity'] if 'price_elasticity' in row else np.nan,
-                        'exog_features': features, # Store the feature list actually used in training
+                        'exog_features': features, # 存储训练时实际使用的特征列表
                         'test_r2': row['test_r2'] if 'test_r2' in row else np.nan,
                         'ln_resid_std': ln_resid_std,
                         'model_type': row['model'] if 'model' in row else 'Unknown'
@@ -143,30 +138,30 @@ class VegetableOptimizer:
         print(f"Successfully loaded {len(self.demand_models)} demand models.")
     
     def predict_demand(self, category, price, date, wholesale_cost=None):
-        """Predict demand using the loaded model (RandomForest expects ln_quantity as target).
-        To align with training features, this constructs key engineered features:
-        - ln_price, ln_wholesale, ln_markup_ratio
-        - time_trend, is_weekend, weekday dummies
-        Other history-based features (lags/rollings) are set to neutral defaults.
+        """使用已加载的模型预测需求（随机森林以 ln_quantity 为目标）。
+        为与训练特征对齐，将构造关键特征：
+        - ln_price、ln_wholesale、ln_markup_ratio
+        - time_trend、is_weekend、weekday 独热编码
+        其他基于历史的特征（滞后/滚动）设为中性默认值。
         """
         if category not in self.demand_models:
-            # Return a default baseline demand and high uncertainty if no model exists
+            # 若无可用模型，则返回默认基线需求与较高不确定性
             return 15.0, 15.0 * 0.5 
 
         model_info = self.demand_models[category]
         model = model_info['model_object']
         features = model_info['exog_features']
 
-        # 1. Construct the exogenous feature vector (X)
+        # 1. 构造外生特征向量（X）
         date = pd.to_datetime(date)
         exog_data = pd.DataFrame(index=[0])
         
-        # Price-related features
+        # 价格相关特征
         if 'ln_price' in features:
             exog_data['ln_price'] = float(np.log(max(price, 1e-6)))
         if 'ln_wholesale' in features:
             if wholesale_cost is None:
-                # If not provided, approximate using price and an assumed markup
+                # 若未提供，则用价格与假定加价率进行近似
                 approx_wholesale = max(price / max(self.opt_config.get('min_markup_ratio', 1.6), 1e-6), 1e-6)
                 exog_data['ln_wholesale'] = float(np.log(approx_wholesale))
             else:
@@ -175,39 +170,39 @@ class VegetableOptimizer:
             w = wholesale_cost if wholesale_cost is not None else max(price / max(self.opt_config.get('min_markup_ratio', 1.6), 1e-6), 1e-6)
             exog_data['ln_markup_ratio'] = float(np.log(max(price / max(w, 1e-6), 1e-6)))
         if 'ln_relative_price' in features:
-            # Use markup ratio as a proxy for relative price in absence of peers
+            # 在缺少同类对比时，以加价率作为相对价格的替代
             w = wholesale_cost if wholesale_cost is not None else max(price / max(self.opt_config.get('min_markup_ratio', 1.6), 1e-6), 1e-6)
             exog_data['ln_relative_price'] = float(np.log(max(price / max(w, 1e-6), 1e-6)))
 
-        # Calendar features
+        # 日历类特征
         if 'is_weekend' in features:
             exog_data['is_weekend'] = 1 if date.dayofweek >= 5 else 0
         if 'time_trend' in features:
-            # Calculate days since the (training) start date and normalize with the same span as training
+            # 计算自（训练）起始日期以来的天数，并按与训练相同的跨度进行归一化
             days_since_start = max(0, (date - self.time_series_start_date).days)
             denom = max(1, getattr(self, 'time_trend_denominator', 365))
             exog_data['time_trend'] = min(days_since_start / denom, 1.0)
-        # Weekday one-hot (weekday_0..weekday_6)
+        # 工作日独热编码（weekday_0..weekday_6）
         for wd in range(7):
             col = f'weekday_{wd}'
             if col in features:
                 exog_data[col] = 1 if date.weekday() == wd else 0
 
-        # Ensure all required features exist; fill missing with 0.0 as a safe default
+        # 确保所需特征齐全；缺失项以 0.0 作为安全默认值
         missing_cols = [col for col in features if col not in exog_data.columns]
         for col in missing_cols:
             exog_data[col] = 0.0
-        # Ensure the columns are in the same order as during training
+        # 确保列顺序与训练时一致
         exog_data = exog_data[features]
-        # Ensure numeric dtype
+        # 确保为数值类型
         exog_data = exog_data.astype(float)
 
-        # 2. Predict using the model (RandomForest outputs ln_quantity prediction)
+        # 2. 使用模型进行预测（随机森林输出 ln_quantity 的预测值）
         try:
             ln_pred_val = float(model.predict(exog_data)[0])
             if not np.isfinite(ln_pred_val):
                 raise ValueError(f"ln_pred not finite: {ln_pred_val}")
-            # Blend in a negative elasticity prior to enforce monotonic relation with price
+            # 融合一个负的价格弹性先验，以加强与价格的单调关系
             ln_price_cur = float(np.log(max(price, 1e-6)))
             ln_price_ref = float(self.category_ln_price_ref.get(category, ln_price_cur))
             elasticity_prior = float(self.opt_config.get('demand_elasticity_prior', -1.0))  # should be negative
@@ -221,19 +216,18 @@ class VegetableOptimizer:
             print(f"ERROR predicting for {category} on {date}: {e}")
             return 15.0, 15.0 * 0.5
 
-        # 3. Estimate uncertainty
+        # 3. 估计不确定性
         demand_std = None
-        # Prefer residual std on ln-scale if available
         ln_sigma = model_info.get('ln_resid_std', None)
         if ln_sigma is not None and np.isfinite(ln_sigma) and ln_sigma > 0:
             demand_std = max(predicted_demand * float(ln_sigma), predicted_demand * 0.05)
 
         if demand_std is None or not np.isfinite(demand_std) or demand_std <= 0:
-            # Fallback: derive a conservative std from test R^2
+            # 退化处理：根据测试集 R^2 得到保守的标准差
             uncertainty_factor = np.sqrt(1 - max(0, model_info.get('test_r2', 0.5)))
             demand_std = max(predicted_demand * uncertainty_factor * 0.5, predicted_demand * 0.05)
         
-        # Cap demand to a reasonable historical quantile to avoid unrealistic spikes
+        # 将需求上限限定在合理的历史分位数以避免不现实的尖峰
         cap = self.category_demand_cap.get(category)
         if cap is not None and np.isfinite(cap) and cap > 0:
             predicted_demand = float(min(predicted_demand, cap * 1.1))
@@ -241,21 +235,21 @@ class VegetableOptimizer:
     
     def calculate_profit_scenarios(self, category, price, date, quantity, wholesale_cost, 
                                  n_scenarios=20, wastage_rate=None):
-        """Calculates profit scenarios using model-based demand prediction.
-        Improvements:
-        - Use wholesale_cost in demand prediction for feature consistency.
-        - Model stockout penalty and wastage (leftover) penalty explicitly.
-        - Do not pre-reduce available stock by wastage; wastage applies to leftovers.
-        Returns array of profit for each scenario.
+        """基于模型的需求预测来计算利润场景。
+        改进点：
+        - 在需求预测中使用 wholesale_cost，以保持特征一致性。
+        - 明确建模缺货惩罚与损耗（剩余）惩罚。
+        - 不预先用损耗减少可用库存；损耗只作用于剩余部分。
+        返回每个场景的利润数组。
         """
         if wastage_rate is None:
             wastage_rate = self.default_wastage_rate
         mean_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
         
         if std_demand <= 0:
-            std_demand = mean_demand * 0.1 # Assign a floor to uncertainty
+            std_demand = mean_demand * 0.1 # 为不确定性设置下限
 
-        np.random.seed(hash(date) % (2**32 - 1)) # Seed with date for consistency
+        np.random.seed(hash(date) % (2**32 - 1)) # 使用日期作为随机种子以保持一致性
         demand_scenarios = np.random.normal(mean_demand, std_demand, n_scenarios)
         demand_scenarios = np.maximum(demand_scenarios, 0.0)
         
@@ -275,7 +269,7 @@ class VegetableOptimizer:
         return np.array(profits)
 
     def simulate_metrics(self, category, price, date, quantity, wholesale_cost, n_scenarios=None, wastage_rate=None):
-        """Simulate demand to compute expected metrics used for reporting and optimization."""
+        """模拟需求以计算用于报告与优化的期望指标。"""
         if n_scenarios is None:
             n_scenarios = int(self.opt_config.get('monte_carlo_samples', 50))
         if wastage_rate is None:
@@ -294,13 +288,13 @@ class VegetableOptimizer:
         stockout_penalty = stockout * wholesale_cost * self.opt_config.get('stockout_penalty_weight', 0.0)
         wastage_penalty = leftover * wholesale_cost * self.opt_config.get('wastage_penalty_weight', 0.0) * max(wastage_rate, 0.0)
         profit = revenue - cost - stockout_penalty - wastage_penalty
-        # Aggregate metrics
+        # 汇总指标
         eps = 1e-9
         expected = {
             'expected_profit': float(np.mean(profit)),
             'profit_std': float(np.std(profit)),
             'expected_revenue': float(np.mean(revenue)),
-            'expected_cost': float(cost),  # cost does not vary across scenarios here
+            'expected_cost': float(cost),  # 此处不同场景下成本不变
             'expected_sales': float(np.mean(actual_sales)),
             'expected_leftover': float(np.mean(leftover)),
             'expected_stockout': float(np.mean(stockout)),
@@ -309,14 +303,14 @@ class VegetableOptimizer:
         return expected
 
     def evaluate_markup_profit(self, category, wholesale_cost, date, markup_ratio):
-        """Evaluates the profit for a given markup ratio by predicting demand."""
+        """通过预测需求来评估给定加价率下的利润。"""
         price = wholesale_cost * markup_ratio
         
-        # Predict demand and determine order quantity with safety stock
+        # 预测需求并基于安全库存计算订货量
         predicted_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
         order_quantity = self.calculate_order_quantity(predicted_demand, std_demand)
 
-        # Calculate expected profit using Monte Carlo simulation
+        # 使用蒙特卡洛模拟计算期望利润
         metrics = self.simulate_metrics(
             category, price, date, order_quantity, wholesale_cost,
             n_scenarios=self.opt_config['monte_carlo_samples']
@@ -325,19 +319,19 @@ class VegetableOptimizer:
         expected_profit = metrics['expected_profit']
         profit_std = metrics['profit_std']
         
-        # Risk-adjusted profit (penalize variance)
+        # 风险调整后的利润（对波动进行惩罚）
         risk_penalty = self.opt_config.get('risk_aversion_factor', 0.1) * profit_std
         return expected_profit - risk_penalty
 
     def golden_section_search(self, category, wholesale_cost, date, a, b, tol=1e-3):
-        """Golden section search for the optimal markup ratio."""
+        """使用黄金分割搜索最优加价率。"""
         phi = (1 + np.sqrt(5)) / 2
         resphi = 2 - phi
         
         x1 = a + resphi * (b - a)
         x2 = b - resphi * (b - a)
         
-        # Note: We maximize profit, so we don't negate the function value
+        # 注意：我们在最大化利润，因此不取函数值的相反数
         f1 = self.evaluate_markup_profit(category, wholesale_cost, date, x1)
         f2 = self.evaluate_markup_profit(category, wholesale_cost, date, x2)
         
@@ -361,36 +355,36 @@ class VegetableOptimizer:
         return (a + b) / 2
 
     def calculate_order_quantity(self, predicted_demand, std_demand, wastage_rate=None):
-        """Calculates order quantity including safety stock based on service level.
-        Enforce R*(1-W) \u003e= Q by scaling for wastage.
+        """基于服务水平计算订货量，包含安全库存。
+        通过考虑损耗来保证 R*(1-W) \u003e= Q。
         """
         if wastage_rate is None:
             wastage_rate = self.default_wastage_rate
         service_level = self.opt_config['service_level']
-        # Z-score for standard normal distribution
+        # 标准正态分布的 Z 分数
         z_score_map = {0.80: 0.84, 0.85: 1.04, 0.90: 1.28, 0.95: 1.65, 0.98: 2.05}
-        safety_factor = z_score_map.get(service_level, 1.65) # Default to 95%
+        safety_factor = z_score_map.get(service_level, 1.65) # 默认按 95%
         
         safety_stock = safety_factor * std_demand
-        # Scale up to ensure net available after wastage meets expected demand
+        # 放大订货量以确保扣除损耗后的净可用量满足期望需求
         net_required = predicted_demand + safety_stock
         order_quantity = net_required / max(1e-6, (1 - max(wastage_rate, 0.0)))
-        return max(0.0, order_quantity) # Ensure non-negative
+        return max(0.0, order_quantity) # 保证非负
 
     def optimize_category(self, category, wholesale_cost, date):
-        """Optimizes price and quantity for a category on a specific date."""
+        """在特定日期为某个品类优化价格与订货量。"""
         if category not in self.demand_models:
-            # Default strategy if no model is available
+            # 若无模型可用，采用默认策略
             optimal_markup = np.mean([self.opt_config['min_markup_ratio'], self.opt_config['max_markup_ratio']])
             optimal_price = wholesale_cost * optimal_markup
-            # Cannot predict demand, so return a placeholder quantity
+            # 无法预测需求，返回占位订货量
             return optimal_price, 10.0
 
-        # Define search bounds for markup ratio from config
+        # 从配置中读取加价率搜索边界
         min_markup = self.opt_config['min_markup_ratio']
         max_markup = self.opt_config['max_markup_ratio']
 
-        # Find the optimal markup ratio using golden section search
+        # 使用黄金分割搜索得到最优加价率
         optimal_markup = self.golden_section_search(
             category, wholesale_cost, date, min_markup, max_markup
         )
@@ -402,24 +396,24 @@ class VegetableOptimizer:
         return optimal_price, optimal_quantity
 
     def generate_wholesale_forecasts(self, categories):
-        """Generates simplified wholesale price forecasts for the given categories."""
+        """为给定品类生成简化的批发价预测。"""
         forecasts = {}
         horizon = self.opt_config['optimization_horizon']
         base_prices = self.config['base_wholesale_prices']
 
-        # Deterministic pseudo-forecast for reproducibility
+        # 确定性的伪预测以保证可复现性
         rng = np.random.default_rng(20230701)
         for category in categories:
-            base_price = base_prices.get(category, 5.0) # Default price if not in config
+            base_price = base_prices.get(category, 5.0) # 若配置缺失则使用默认价格
             days = np.arange(horizon)
-            seasonal_effect = 0.1 * np.sin(2 * np.pi * days / 7) # Weekly seasonality
+            seasonal_effect = 0.1 * np.sin(2 * np.pi * days / 7) # 周期为一周的季节性
             noise = rng.normal(0, 0.02, horizon)
             price_multipliers = 1 + seasonal_effect + noise
             forecasts[category] = base_price * price_multipliers
         return forecasts
 
     def run_daily_optimization(self):
-        """Runs the daily optimization loop for all categories with models."""
+        """对所有拥有模型的品类执行每日优化循环。"""
         print("\nStarting daily optimization...")
         categories_with_models = list(self.demand_models.keys())
         if not categories_with_models:
@@ -430,7 +424,7 @@ class VegetableOptimizer:
         
         results = []
         horizon = self.opt_config['optimization_horizon']
-        # Use a fixed target week start date per 23C requirement (2023-07-01), overridable via config
+        # 按 23C 要求使用固定的目标周起始日期（2023-07-01），可通过配置覆盖
         cfg_start = self.config.get('target_week_start_date', '2023-07-01')
         try:
             start_date = pd.to_datetime(cfg_start).date()
@@ -448,7 +442,7 @@ class VegetableOptimizer:
                     category, wholesale_cost, current_date
                 )
                 
-                # Recalculate expected profit and extended metrics for reporting
+                # 重新计算用于报告的期望利润与扩展指标
                 metrics = self.simulate_metrics(
                     category, optimal_price, current_date, optimal_quantity, wholesale_cost,
                     n_scenarios=self.opt_config['monte_carlo_samples']
@@ -479,7 +473,7 @@ class VegetableOptimizer:
         return pd.DataFrame(results)
 
     def save_optimization_results(self, results_df):
-        """Saves optimization results to a CSV file."""
+        """将优化结果保存为 CSV 文件。"""
         if not os.path.exists(self.output_paths['results_dir']):
             os.makedirs(self.output_paths['results_dir'])
         path = os.path.join(self.output_paths['results_dir'], 'optimization_results.csv')
@@ -487,7 +481,7 @@ class VegetableOptimizer:
         print(f"\nOptimization results saved to {path}")
 
     def plot_price_quantity_profit(self, category, wholesale_cost, date):
-        """Plots the price-demand-profit relationship for a given date."""
+        """绘制给定日期下的价格-需求-利润关系曲线。"""
         if category not in self.demand_models:
             print(f"Cannot plot for {category}: No demand model available.")
             return
@@ -554,7 +548,7 @@ if __name__ == '__main__':
             today = datetime.now().date()
             
             for cat in example_categories:
-                # Ensure the category from results exists before plotting
+                # 在绘图前确保该品类存在于结果中
                 if cat in optimization_results['category'].unique():
                     first_day_cost = optimization_results[optimization_results['category'] == cat]['wholesale_cost'].iloc[0]
                     optimizer.plot_price_quantity_profit(cat, first_day_cost, today)
