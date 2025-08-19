@@ -18,7 +18,8 @@ from data_auditor import DataAuditor
 from feature_engineer import FeatureEngineer
 from demand_modeler import DemandModeler
 from optimizer import VegetableOptimizer
-from visualizer import Visualizer
+# 延迟导入 Visualizer，避免在未使用可视化模块时因依赖缺失而报错
+# from visualizer import Visualizer
 
 class VegetablePricingPipeline:
     """蔬菜定价与补货策略分析管道"""
@@ -157,11 +158,15 @@ class VegetablePricingPipeline:
                 'wholesale_cost': 'mean',
                 'optimal_price': 'mean', 
                 'optimal_quantity': 'mean',
-                'expected_profit': 'sum'
+                'expected_profit': 'sum',
+                'expected_revenue': 'sum',
+                'expected_cost': 'sum',
+                'service_rate': 'mean'
             }).reset_index()
             
-            weekly_summary.columns = ['category', 'avg_wholesale_cost', 'avg_optimal_price', 'avg_optimal_quantity', 'total_expected_profit']
+            weekly_summary.columns = ['category', 'avg_wholesale_cost', 'avg_optimal_price', 'avg_optimal_quantity', 'total_expected_profit', 'total_revenue', 'total_cost', 'avg_service_rate']
             weekly_summary['profit_margin'] = (weekly_summary['avg_optimal_price'] - weekly_summary['avg_wholesale_cost']) / weekly_summary['avg_wholesale_cost']
+            weekly_summary['net_profit'] = weekly_summary['total_revenue'] - weekly_summary['total_cost']
             
             # 保存周策略
             import os
@@ -184,12 +189,19 @@ class VegetablePricingPipeline:
         """运行可视化生成"""
         try:
             start_time = datetime.now()
-            visualizer = Visualizer(self.config_path)
+            # 延迟导入，避免在未安装可视化依赖或未需要可视化时出错
+            from visualizer import OptimizationVisualizer, setup_chinese_fonts
+            # 先全局设置中文字体，确保后续图表均能正确显示中文
+            try:
+                setup_chinese_fonts()
+            except Exception:
+                pass
+            visualizer = OptimizationVisualizer(self.config_path)
             results = visualizer.generate_all_visualizations()
             duration = (datetime.now() - start_time).total_seconds()
             
             # 检查是否有图表生成成功
-            success_count = sum(1 for result in results.values() if result is not None)
+            success_count = sum(1 for result in results.values() if result)
             
             if success_count > 0:
                 self.log_execution("可视化生成", "success", f"生成了{success_count}个图表", duration)
@@ -200,6 +212,26 @@ class VegetablePricingPipeline:
                 
         except Exception as e:
             self.log_execution("可视化生成", "error", f"执行异常: {str(e)}")
+            return False
+    
+    def run_report_generation(self):
+        """运行报告生成"""
+        try:
+            start_time = datetime.now()
+            from report_generator import OptimizationReportGenerator
+            generator = OptimizationReportGenerator(self.config_path)
+            report_path = generator.generate_full_report()
+            duration = (datetime.now() - start_time).total_seconds()
+            
+            if report_path and os.path.exists(report_path):
+                self.log_execution("报告生成", "success", f"分析报告已生成", duration)
+                return True
+            else:
+                self.log_execution("报告生成", "error", "报告生成失败", duration)
+                return False
+                
+        except Exception as e:
+            self.log_execution("报告生成", "error", f"执行异常: {str(e)}")
             return False
     
     def run_full_pipeline(self, modules=None):
@@ -216,13 +248,14 @@ class VegetablePricingPipeline:
             ("特征工程", self.run_feature_engineering),
             ("需求建模", self.run_demand_modeling),
             ("优化算法", self.run_optimization),
-            ("可视化生成", self.run_visualization)
+            ("可视化生成", self.run_visualization),
+            ("报告生成", self.run_report_generation)
         ]
         
         # 如果指定了特定模块，只运行这些模块
         if modules:
             module_map = {
-                'audit': 0, 'features': 1, 'modeling': 2, 'optimization': 3, 'visualization': 4
+                'audit': 0, 'features': 1, 'modeling': 2, 'optimization': 3, 'visualization': 4, 'reports': 5
             }
             selected_modules = []
             for module in modules:
@@ -285,15 +318,17 @@ class VegetablePricingPipeline:
     def show_output_files(self):
         """显示输出文件"""
         output_files = [
-            ("数据审计报告", "reports/data_audit_report.md"),
-            ("特征工程报告", "reports/feature_engineering_report.md"),
-            ("需求建模报告", "reports/demand_modeling_report.md"),
-            ("优化策略报告", "reports/optimization_report.md"),
+            # 数据文件
             ("建模结果", "outputs/results/demand_model_results.csv"),
             ("优化结果", "outputs/results/optimization_results.csv"),
             ("周策略汇总", "outputs/results/weekly_strategy.csv"),
-            ("需求模型性能图", "outputs/figures/demand_model_performance.png"),
-            ("优化结果图", "outputs/figures/optimization_results.png"),
+            # 报告文件
+            ("优化策略报告", "reports/optimization_strategy_report.md"),
+            # 可视化图表
+            ("利润热力图", "outputs/figures/profit_heatmap.png"),
+            ("定价策略图", "outputs/figures/pricing_strategy.png"),
+            ("服务指标图", "outputs/figures/service_metrics.png"),
+            ("周汇总图", "outputs/figures/weekly_summary.png"),
             ("汇总仪表板", "outputs/figures/summary_dashboard.png")
         ]
         
@@ -310,7 +345,7 @@ def main():
     parser = argparse.ArgumentParser(description='蔬菜定价与补货策略分析管道')
     parser.add_argument('--config', '-c', default='config/config.json', help='配置文件路径')
     parser.add_argument('--modules', '-m', nargs='+', 
-                       choices=['audit', 'features', 'modeling', 'optimization', 'visualization'],
+                       choices=['audit', 'features', 'modeling', 'optimization', 'visualization', 'reports'],
                        help='指定要运行的模块')
     
     args = parser.parse_args()

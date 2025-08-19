@@ -36,12 +36,16 @@ class VegetableOptimizer:
         }
         self.opt_config = self.config['optimization']
         self.demand_models = {}
+        # Global default wastage rate for ordering and simulation
+        self.default_wastage_rate = float(self.opt_config.get('wastage_rate', 0.05))
         # Store the start date from training to calculate time trend
         self.time_series_start_date = pd.to_datetime(self.config['time_series_start_date'])
         # Denominator used to normalize time_trend, aligned with training data span
         self.time_trend_denominator = 365
         # Try to align time trend scaling with FeatureEngineer outputs
         self._init_time_trend_scaler()
+        # Initialize category baselines and caps from training features
+        self._init_category_baselines_and_caps()
 
     def _init_time_trend_scaler(self):
         """Initialize time trend normalization using the training feature file if available."""
@@ -61,9 +65,38 @@ class VegetableOptimizer:
         except Exception as e:
             print(f"Warning: failed to initialize time_trend scaler: {e}")
     
+    def _init_category_baselines_and_caps(self):
+        """Compute per-category baseline ln_price and demand caps using training features."""
+        self.category_ln_price_ref = {}
+        self.category_demand_cap = {}
+        try:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            train_feat_rel = self.config.get('data_paths', {}).get('train_features')
+            if not train_feat_rel:
+                return
+            train_feat_path = os.path.join(project_root, train_feat_rel)
+            if not os.path.exists(train_feat_path):
+                return
+            df = pd.read_csv(train_feat_path)
+            if '分类名称' not in df.columns:
+                return
+            df['销售日期'] = pd.to_datetime(df['销售日期']) if '销售日期' in df.columns else pd.NaT
+            # Compute ln_price reference as mean per category
+            grp = df.groupby('分类名称')['ln_price']
+            self.category_ln_price_ref = grp.mean().to_dict()
+            # Aggregate to category-date quantity (sum of exp(ln_quantity))
+            if 'ln_quantity' in df.columns:
+                df['quantity'] = np.exp(df['ln_quantity']).clip(lower=1e-6)
+                q = df.groupby(['分类名称', '销售日期'], as_index=False)['quantity'].sum()
+                qtl = float(self.opt_config.get('demand_cap_quantile', 0.95))
+                for cat, sub in q.groupby('分类名称'):
+                    self.category_demand_cap[cat] = float(sub['quantity'].quantile(qtl))
+        except Exception as e:
+            print(f"Warning: failed to initialize category baselines/caps: {e}")
+    
     def load_demand_models(self):
-        """Loads the fitted SARIMAX models and their metadata."""
-        print("Loading SARIMAX demand models...")
+        """Loads the fitted RandomForest (or other) models and their metadata."""
+        print("Loading demand models...")
         model_dir = self.output_paths['model_dir']
         results_path = os.path.join(self.output_paths['results_dir'], 'demand_model_results.csv')
 
@@ -72,7 +105,7 @@ class VegetableOptimizer:
             return
 
         models_df = pd.read_csv(results_path)
-        exog_features = self.config['sarimax_exog_features']
+        default_features = self.config.get('tree_features', self.config.get('sarimax_exog_features', []))
 
         for index, row in models_df.iterrows():
             category = row['category']
@@ -80,11 +113,27 @@ class VegetableOptimizer:
             if os.path.exists(model_path):
                 try:
                     model_obj = joblib.load(model_path)
+                    # Parse features used by the model if present in results
+                    features = default_features
+                    if 'features' in row and pd.notna(row['features']):
+                        raw = str(row['features'])
+                        try:
+                            import json as _json
+                            features = _json.loads(raw)
+                        except Exception:
+                            # Fallback: strip brackets/quotes and split by comma
+                            raw2 = raw.strip().strip('[]')
+                            parts = [p.strip().strip("'\"") for p in raw2.split(',') if p.strip()]
+                            if parts:
+                                features = parts
+                    ln_resid_std = row['ln_resid_std'] if 'ln_resid_std' in row and pd.notna(row['ln_resid_std']) else None
                     self.demand_models[category] = {
                         'model_object': model_obj,
-                        'price_elasticity': row['price_elasticity'],
-                        'exog_features': exog_features, # Store the feature list
-                        'test_r2': row['test_r2']
+                        'price_elasticity': row['price_elasticity'] if 'price_elasticity' in row else np.nan,
+                        'exog_features': features, # Store the feature list actually used in training
+                        'test_r2': row['test_r2'] if 'test_r2' in row else np.nan,
+                        'ln_resid_std': ln_resid_std,
+                        'model_type': row['model'] if 'model' in row else 'Unknown'
                     }
                 except Exception as e:
                     print(f"  - Failed to load model for {category}: {e}")
@@ -93,8 +142,13 @@ class VegetableOptimizer:
 
         print(f"Successfully loaded {len(self.demand_models)} demand models.")
     
-    def predict_demand(self, category, price, date):
-        """Predicts demand for a given category, price, and date using its SARIMAX model."""
+    def predict_demand(self, category, price, date, wholesale_cost=None):
+        """Predict demand using the loaded model (RandomForest expects ln_quantity as target).
+        To align with training features, this constructs key engineered features:
+        - ln_price, ln_wholesale, ln_markup_ratio
+        - time_trend, is_weekend, weekday dummies
+        Other history-based features (lags/rollings) are set to neutral defaults.
+        """
         if category not in self.demand_models:
             # Return a default baseline demand and high uncertainty if no model exists
             return 15.0, 15.0 * 0.5 
@@ -107,8 +161,25 @@ class VegetableOptimizer:
         date = pd.to_datetime(date)
         exog_data = pd.DataFrame(index=[0])
         
+        # Price-related features
         if 'ln_price' in features:
-            exog_data['ln_price'] = np.log(price)
+            exog_data['ln_price'] = float(np.log(max(price, 1e-6)))
+        if 'ln_wholesale' in features:
+            if wholesale_cost is None:
+                # If not provided, approximate using price and an assumed markup
+                approx_wholesale = max(price / max(self.opt_config.get('min_markup_ratio', 1.6), 1e-6), 1e-6)
+                exog_data['ln_wholesale'] = float(np.log(approx_wholesale))
+            else:
+                exog_data['ln_wholesale'] = float(np.log(max(wholesale_cost, 1e-6)))
+        if 'ln_markup_ratio' in features:
+            w = wholesale_cost if wholesale_cost is not None else max(price / max(self.opt_config.get('min_markup_ratio', 1.6), 1e-6), 1e-6)
+            exog_data['ln_markup_ratio'] = float(np.log(max(price / max(w, 1e-6), 1e-6)))
+        if 'ln_relative_price' in features:
+            # Use markup ratio as a proxy for relative price in absence of peers
+            w = wholesale_cost if wholesale_cost is not None else max(price / max(self.opt_config.get('min_markup_ratio', 1.6), 1e-6), 1e-6)
+            exog_data['ln_relative_price'] = float(np.log(max(price / max(w, 1e-6), 1e-6)))
+
+        # Calendar features
         if 'is_weekend' in features:
             exog_data['is_weekend'] = 1 if date.dayofweek >= 5 else 0
         if 'time_trend' in features:
@@ -116,106 +187,143 @@ class VegetableOptimizer:
             days_since_start = max(0, (date - self.time_series_start_date).days)
             denom = max(1, getattr(self, 'time_trend_denominator', 365))
             exog_data['time_trend'] = min(days_since_start / denom, 1.0)
-        # Add other potential features if they were used in training
-        # This part needs to be perfectly aligned with feature_engineer.py
+        # Weekday one-hot (weekday_0..weekday_6)
+        for wd in range(7):
+            col = f'weekday_{wd}'
+            if col in features:
+                exog_data[col] = 1 if date.weekday() == wd else 0
 
+        # Ensure all required features exist; fill missing with 0.0 as a safe default
+        missing_cols = [col for col in features if col not in exog_data.columns]
+        for col in missing_cols:
+            exog_data[col] = 0.0
         # Ensure the columns are in the same order as during training
         exog_data = exog_data[features]
         # Ensure numeric dtype
         exog_data = exog_data.astype(float)
 
-        # 2. Predict using the model
+        # 2. Predict using the model (RandomForest outputs ln_quantity prediction)
         try:
-            # Use predict with confidence interval for uncertainty estimation
-            try:
-                ln_pred, conf_int = model.predict(n_periods=1, exogenous=exog_data, return_conf_int=True)
-            except TypeError:
-                # Fallback for versions expecting X keyword
-                ln_pred, conf_int = model.predict(n_periods=1, X=exog_data, return_conf_int=True)
-
-            ln_pred_arr = np.asarray(ln_pred).reshape(-1)
-            if ln_pred_arr.size < 1:
-                raise ValueError("empty prediction array")
-            ln_pred_val = float(ln_pred_arr[0])
+            ln_pred_val = float(model.predict(exog_data)[0])
             if not np.isfinite(ln_pred_val):
                 raise ValueError(f"ln_pred not finite: {ln_pred_val}")
-            predicted_demand = float(np.exp(ln_pred_val))
-            
-            # Guard against numerical underflow/overflow
+            # Blend in a negative elasticity prior to enforce monotonic relation with price
+            ln_price_cur = float(np.log(max(price, 1e-6)))
+            ln_price_ref = float(self.category_ln_price_ref.get(category, ln_price_cur))
+            elasticity_prior = float(self.opt_config.get('demand_elasticity_prior', -1.0))  # should be negative
+            blend = float(self.opt_config.get('elasticity_blend', 0.6))
+            ln_pred_adj = ln_pred_val + blend * elasticity_prior * (ln_price_cur - ln_price_ref)
+            predicted_demand = float(np.exp(ln_pred_adj))
             if not np.isfinite(predicted_demand) or predicted_demand <= 0:
                 print(f"ERROR predicting for {category} on {date}: Invalid prediction {predicted_demand}")
                 return 15.0, 15.0 * 0.5
-                
         except Exception as e:
             print(f"ERROR predicting for {category} on {date}: {e}")
-            return 15.0, 15.0 * 0.5 # Fallback on error
+            return 15.0, 15.0 * 0.5
 
         # 3. Estimate uncertainty
         demand_std = None
-        try:
-            # If confidence interval was returned, approximate std from it on log-scale
-            ci_arr = np.asarray(conf_int)
-            # Handle shapes: (2,) or (1,2) or DataFrame-like
-            if ci_arr.ndim == 1 and ci_arr.size == 2:
-                ln_lower, ln_upper = float(ci_arr[0]), float(ci_arr[1])
-            else:
-                ln_lower, ln_upper = float(ci_arr[0, 0]), float(ci_arr[0, 1])
-            ln_width = max(0.0, ln_upper - ln_lower)
-            # 95% CI width ≈ 3.92 * sigma
-            ln_sigma = max(ln_width / 3.92, 1e-6)
-            # Delta method: std(Y) ≈ Y * sigma when Y = exp(X)
-            demand_std = max(predicted_demand * ln_sigma, predicted_demand * 0.05)
-        except Exception:
-            pass
+        # Prefer residual std on ln-scale if available
+        ln_sigma = model_info.get('ln_resid_std', None)
+        if ln_sigma is not None and np.isfinite(ln_sigma) and ln_sigma > 0:
+            demand_std = max(predicted_demand * float(ln_sigma), predicted_demand * 0.05)
 
         if demand_std is None or not np.isfinite(demand_std) or demand_std <= 0:
             # Fallback: derive a conservative std from test R^2
             uncertainty_factor = np.sqrt(1 - max(0, model_info.get('test_r2', 0.5)))
             demand_std = max(predicted_demand * uncertainty_factor * 0.5, predicted_demand * 0.05)
         
+        # Cap demand to a reasonable historical quantile to avoid unrealistic spikes
+        cap = self.category_demand_cap.get(category)
+        if cap is not None and np.isfinite(cap) and cap > 0:
+            predicted_demand = float(min(predicted_demand, cap * 1.1))
         return predicted_demand, demand_std
     
     def calculate_profit_scenarios(self, category, price, date, quantity, wholesale_cost, 
-                                 n_scenarios=20, wastage_rate=0.05):
-        """Calculates profit scenarios using model-based demand prediction."""
-        mean_demand, std_demand = self.predict_demand(category, price, date)
+                                 n_scenarios=20, wastage_rate=None):
+        """Calculates profit scenarios using model-based demand prediction.
+        Improvements:
+        - Use wholesale_cost in demand prediction for feature consistency.
+        - Model stockout penalty and wastage (leftover) penalty explicitly.
+        - Do not pre-reduce available stock by wastage; wastage applies to leftovers.
+        Returns array of profit for each scenario.
+        """
+        if wastage_rate is None:
+            wastage_rate = self.default_wastage_rate
+        mean_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
         
         if std_demand <= 0:
             std_demand = mean_demand * 0.1 # Assign a floor to uncertainty
 
         np.random.seed(hash(date) % (2**32 - 1)) # Seed with date for consistency
         demand_scenarios = np.random.normal(mean_demand, std_demand, n_scenarios)
-        demand_scenarios = np.maximum(demand_scenarios, 0.1)
+        demand_scenarios = np.maximum(demand_scenarios, 0.0)
         
         profits = []
         for demand in demand_scenarios:
-            available_quantity = quantity * (1 - wastage_rate)
+            available_quantity = max(quantity, 0.0)
             actual_sales = min(demand, available_quantity)
             revenue = actual_sales * price
             cost = quantity * wholesale_cost
-            stockout = max(0, demand - actual_sales)
-            stockout_penalty = stockout * wholesale_cost * self.opt_config['stockout_penalty_weight']
-            profit = revenue - cost - stockout_penalty
+            stockout = max(0.0, demand - actual_sales)
+            leftover = max(0.0, available_quantity - actual_sales)
+            stockout_penalty = stockout * wholesale_cost * self.opt_config.get('stockout_penalty_weight', 0.0)
+            wastage_penalty = leftover * wholesale_cost * self.opt_config.get('wastage_penalty_weight', 0.0) * max(wastage_rate, 0.0)
+            profit = revenue - cost - stockout_penalty - wastage_penalty
             profits.append(profit)
         
         return np.array(profits)
+
+    def simulate_metrics(self, category, price, date, quantity, wholesale_cost, n_scenarios=None, wastage_rate=None):
+        """Simulate demand to compute expected metrics used for reporting and optimization."""
+        if n_scenarios is None:
+            n_scenarios = int(self.opt_config.get('monte_carlo_samples', 50))
+        if wastage_rate is None:
+            wastage_rate = self.default_wastage_rate
+        mean_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
+        if std_demand <= 0:
+            std_demand = mean_demand * 0.1
+        np.random.seed(hash(date) % (2**32 - 1))
+        demand = np.maximum(np.random.normal(mean_demand, std_demand, n_scenarios), 0.0)
+        available = max(quantity, 0.0)
+        actual_sales = np.minimum(demand, available)
+        revenue = actual_sales * price
+        cost = available * wholesale_cost
+        stockout = np.maximum(demand - actual_sales, 0.0)
+        leftover = np.maximum(available - actual_sales, 0.0)
+        stockout_penalty = stockout * wholesale_cost * self.opt_config.get('stockout_penalty_weight', 0.0)
+        wastage_penalty = leftover * wholesale_cost * self.opt_config.get('wastage_penalty_weight', 0.0) * max(wastage_rate, 0.0)
+        profit = revenue - cost - stockout_penalty - wastage_penalty
+        # Aggregate metrics
+        eps = 1e-9
+        expected = {
+            'expected_profit': float(np.mean(profit)),
+            'profit_std': float(np.std(profit)),
+            'expected_revenue': float(np.mean(revenue)),
+            'expected_cost': float(cost),  # cost does not vary across scenarios here
+            'expected_sales': float(np.mean(actual_sales)),
+            'expected_leftover': float(np.mean(leftover)),
+            'expected_stockout': float(np.mean(stockout)),
+            'service_rate': float(np.mean(np.where(demand > eps, actual_sales / np.maximum(demand, eps), 1.0)))
+        }
+        return expected
 
     def evaluate_markup_profit(self, category, wholesale_cost, date, markup_ratio):
         """Evaluates the profit for a given markup ratio by predicting demand."""
         price = wholesale_cost * markup_ratio
         
         # Predict demand and determine order quantity with safety stock
-        predicted_demand, std_demand = self.predict_demand(category, price, date)
+        predicted_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
         order_quantity = self.calculate_order_quantity(predicted_demand, std_demand)
 
         # Calculate expected profit using Monte Carlo simulation
-        profit_scenarios = self.calculate_profit_scenarios(
+        metrics = self.simulate_metrics(
             category, price, date, order_quantity, wholesale_cost,
             n_scenarios=self.opt_config['monte_carlo_samples']
         )
         
-        expected_profit = np.mean(profit_scenarios)
-        profit_std = np.std(profit_scenarios)
+        expected_profit = metrics['expected_profit']
+        profit_std = metrics['profit_std']
         
         # Risk-adjusted profit (penalize variance)
         risk_penalty = self.opt_config.get('risk_aversion_factor', 0.1) * profit_std
@@ -252,16 +360,22 @@ class VegetableOptimizer:
         
         return (a + b) / 2
 
-    def calculate_order_quantity(self, predicted_demand, std_demand):
-        """Calculates order quantity including safety stock based on service level."""
+    def calculate_order_quantity(self, predicted_demand, std_demand, wastage_rate=None):
+        """Calculates order quantity including safety stock based on service level.
+        Enforce R*(1-W) \u003e= Q by scaling for wastage.
+        """
+        if wastage_rate is None:
+            wastage_rate = self.default_wastage_rate
         service_level = self.opt_config['service_level']
         # Z-score for standard normal distribution
         z_score_map = {0.80: 0.84, 0.85: 1.04, 0.90: 1.28, 0.95: 1.65, 0.98: 2.05}
         safety_factor = z_score_map.get(service_level, 1.65) # Default to 95%
         
         safety_stock = safety_factor * std_demand
-        order_quantity = predicted_demand + safety_stock
-        return max(0, order_quantity) # Ensure non-negative
+        # Scale up to ensure net available after wastage meets expected demand
+        net_required = predicted_demand + safety_stock
+        order_quantity = net_required / max(1e-6, (1 - max(wastage_rate, 0.0)))
+        return max(0.0, order_quantity) # Ensure non-negative
 
     def optimize_category(self, category, wholesale_cost, date):
         """Optimizes price and quantity for a category on a specific date."""
@@ -282,7 +396,7 @@ class VegetableOptimizer:
         )
         optimal_price = wholesale_cost * optimal_markup
 
-        predicted_demand, std_demand = self.predict_demand(category, optimal_price, date)
+        predicted_demand, std_demand = self.predict_demand(category, optimal_price, date, wholesale_cost=wholesale_cost)
         optimal_quantity = self.calculate_order_quantity(predicted_demand, std_demand)
         
         return optimal_price, optimal_quantity
@@ -293,11 +407,13 @@ class VegetableOptimizer:
         horizon = self.opt_config['optimization_horizon']
         base_prices = self.config['base_wholesale_prices']
 
+        # Deterministic pseudo-forecast for reproducibility
+        rng = np.random.default_rng(20230701)
         for category in categories:
             base_price = base_prices.get(category, 5.0) # Default price if not in config
             days = np.arange(horizon)
             seasonal_effect = 0.1 * np.sin(2 * np.pi * days / 7) # Weekly seasonality
-            noise = np.random.normal(0, 0.03, horizon)
+            noise = rng.normal(0, 0.02, horizon)
             price_multipliers = 1 + seasonal_effect + noise
             forecasts[category] = base_price * price_multipliers
         return forecasts
@@ -314,7 +430,12 @@ class VegetableOptimizer:
         
         results = []
         horizon = self.opt_config['optimization_horizon']
-        start_date = datetime.now().date()
+        # Use a fixed target week start date per 23C requirement (2023-07-01), overridable via config
+        cfg_start = self.config.get('target_week_start_date', '2023-07-01')
+        try:
+            start_date = pd.to_datetime(cfg_start).date()
+        except Exception:
+            start_date = datetime(2023, 7, 1).date()
         
         for day in range(horizon):
             current_date = start_date + timedelta(days=day)
@@ -327,11 +448,13 @@ class VegetableOptimizer:
                     category, wholesale_cost, current_date
                 )
                 
-                # Recalculate expected profit for reporting
-                profit_scenarios = self.calculate_profit_scenarios(
-                    category, optimal_price, current_date, optimal_quantity, wholesale_cost
+                # Recalculate expected profit and extended metrics for reporting
+                metrics = self.simulate_metrics(
+                    category, optimal_price, current_date, optimal_quantity, wholesale_cost,
+                    n_scenarios=self.opt_config['monte_carlo_samples']
                 )
-                expected_profit = np.mean(profit_scenarios)
+                markup_ratio = float(optimal_price / max(wholesale_cost, 1e-6))
+                gross_margin = float((optimal_price - wholesale_cost) / max(optimal_price, 1e-6))
                 
                 results.append({
                     'date': current_date.strftime('%Y-%m-%d'),
@@ -339,10 +462,19 @@ class VegetableOptimizer:
                     'wholesale_cost': wholesale_cost,
                     'optimal_price': optimal_price,
                     'optimal_quantity': optimal_quantity,
-                    'expected_profit': expected_profit
+                    'markup_ratio': markup_ratio,
+                    'gross_margin': gross_margin,
+                    'expected_profit': metrics['expected_profit'],
+                    'profit_std': metrics['profit_std'],
+                    'expected_revenue': metrics['expected_revenue'],
+                    'expected_cost': metrics['expected_cost'],
+                    'expected_sales': metrics['expected_sales'],
+                    'expected_leftover': metrics['expected_leftover'],
+                    'expected_stockout': metrics['expected_stockout'],
+                    'service_rate': metrics['service_rate']
                 })
                 
-                print(f"  - {category}: Cost={wholesale_cost:.2f}, Price={optimal_price:.2f}, Quantity={optimal_quantity:.2f}, Profit={expected_profit:.2f}")
+                print(f"  - {category}: Cost={wholesale_cost:.2f}, Price={optimal_price:.2f}, Quantity={optimal_quantity:.2f}, Profit={metrics['expected_profit']:.2f}")
 
         return pd.DataFrame(results)
 
@@ -366,7 +498,7 @@ class VegetableOptimizer:
         profits = []
 
         for price in price_range:
-            predicted_demand, std_demand = self.predict_demand(category, price, date)
+            predicted_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
             demands.append(predicted_demand)
             
             order_quantity = self.calculate_order_quantity(predicted_demand, std_demand)

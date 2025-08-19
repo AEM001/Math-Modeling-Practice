@@ -5,3 +5,4 @@ statsmodels
 pmdarima
 joblib
 matplotlib
+seaborn
