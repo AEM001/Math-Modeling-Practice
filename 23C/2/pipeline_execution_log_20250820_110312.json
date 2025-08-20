@@ -1,0 +1,167 @@
+{
+  "pipeline_config": {
+    "data_paths": {
+      "raw_item_data": "data/raw/单品级每日汇总表.csv",
+      "raw_category_data": "data/raw/品类级每日汇总表.csv",
+      "processed_data_dir": "data/processed",
+      "train_data": "data/processed/train_data_cleaned.csv",
+      "test_data": "data/processed/test_data_cleaned.csv",
+      "train_features": "data/processed/train_features.csv",
+      "test_features": "data/processed/test_features.csv"
+    },
+    "output_paths": {
+      "reports_dir": "reports",
+      "figures_dir": "outputs/figures",
+      "results_dir": "outputs/results",
+      "model_dir": "outputs/models"
+    },
+    "data_cleaning": {
+      "outlier_threshold": 3.0,
+      "price_multiplier_threshold": 3.0,
+      "min_sales_threshold": 0.1,
+      "train_split_ratio": 0.7
+    },
+    "feature_engineering": {
+      "rolling_windows": [
+        7,
+        14
+      ],
+      "lag_periods": [
+        1,
+        7
+      ],
+      "enable_interaction_features": true
+    },
+    "modeling": {
+      "test_size": 0.2,
+      "cv_folds": 3,
+      "random_state": 42,
+      "models_to_test": [
+        "LinearRegression",
+        "HuberRegressor",
+        "RandomForest",
+        "GradientBoosting"
+      ]
+    },
+    "target_variable": "ln_quantity",
+    "sarimax_exog_features": [
+      "ln_price",
+      "is_weekend",
+      "time_trend"
+    ],
+    "tree_features": [
+      "ln_price",
+      "ln_wholesale",
+      "ln_markup_ratio",
+      "time_trend",
+      "is_weekend",
+      "weekday_0",
+      "weekday_1",
+      "weekday_2",
+      "weekday_3",
+      "weekday_4",
+      "weekday_5",
+      "weekday_6",
+      "ln_relative_price",
+      "price_lag1",
+      "quantity_lag1",
+      "ln_price_lag1",
+      "price_change_1d",
+      "price_lag7",
+      "quantity_lag7",
+      "ln_price_lag7",
+      "price_rolling_7d_mean",
+      "quantity_rolling_7d_mean",
+      "price_volatility_7d",
+      "price_rolling_14d_mean",
+      "quantity_rolling_14d_mean",
+      "ln_price_x_time_trend",
+      "ln_price_x_weekend",
+      "is_promotion"
+    ],
+    "time_series_start_date": "2020-07-01",
+    "base_wholesale_prices": {
+      "花叶类": 6.0,
+      "辣椒类": 18.0,
+      "花菜类": 14.0,
+      "食用菌": 14.0,
+      "茄类": 8.0,
+      "水生根茎类": 10.0
+    },
+    "optimization": {
+      "optimization_horizon": 7,
+      "service_level": 0.8,
+      "min_markup_ratio": 1.0,
+      "max_markup_ratio": 2.0,
+      "max_daily_price_change": 0.1,
+      "price_smoothing_weight": 0.1,
+      "quantity_smoothing_weight": 0.05,
+      "stockout_penalty_weight": 0.01,
+      "wastage_penalty_weight": 0.5,
+      "monte_carlo_samples": 50,
+      "min_service_sales_ratio": 0.7,
+      "demand_elasticity_prior": -1.0,
+      "golden_section_iterations": 15,
+      "wastage_rate": 0.05,
+      "risk_aversion_factor": 0.1,
+      "elasticity_blend": 0.6,
+      "demand_cap_quantile": 0.95
+    },
+    "backtesting": {
+      "min_train_days": 30,
+      "test_days": 7,
+      "step_days": 7,
+      "max_splits": 6
+    }
+  },
+  "execution_log": [
+    {
+      "timestamp": "2025-08-20 11:02:38",
+      "module": "数据质量审计",
+      "status": "success",
+      "message": "数据清洗完成",
+      "duration_seconds": 0.495979
+    },
+    {
+      "timestamp": "2025-08-20 11:02:40",
+      "module": "特征工程",
+      "status": "success",
+      "message": "特征构建完成",
+      "duration_seconds": 1.671057
+    },
+    {
+      "timestamp": "2025-08-20 11:02:42",
+      "module": "需求建模",
+      "status": "success",
+      "message": "模型训练完成，生成了6个模型",
+      "duration_seconds": 2.045028
+    },
+    {
+      "timestamp": "2025-08-20 11:03:07",
+      "module": "优化算法",
+      "status": "success",
+      "message": "策略优化完成，生成了42条优化结果",
+      "duration_seconds": 24.715293
+    },
+    {
+      "timestamp": "2025-08-20 11:03:12",
+      "module": "可视化生成",
+      "status": "success",
+      "message": "生成了5个图表",
+      "duration_seconds": 5.344058
+    },
+    {
+      "timestamp": "2025-08-20 11:03:12",
+      "module": "报告生成",
+      "status": "success",
+      "message": "分析报告已生成",
+      "duration_seconds": 0.01968
+    }
+  ],
+  "summary": {
+    "total_modules": 6,
+    "successful_modules": 6,
+    "failed_modules": 0,
+    "total_duration": 34.291095
+  }
+}

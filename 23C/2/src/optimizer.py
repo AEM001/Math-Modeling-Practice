@@ -41,6 +41,8 @@ class VegetableOptimizer:
         self._init_time_trend_scaler()
         # 从训练特征中初始化各品类的基准与需求上限
         self._init_category_baselines_and_caps()
+        # 计算各类别的平均损耗率
+        self._calculate_average_wastage_rates()
 
     def _init_time_trend_scaler(self):
         """若可用，则使用训练特征文件来初始化时间趋势的归一化。"""
@@ -80,7 +82,7 @@ class VegetableOptimizer:
             grp = df.groupby('分类名称')['ln_price']
             self.category_ln_price_ref = grp.mean().to_dict()
             # 聚合为“品类-日期”的销量（对 ln_quantity 取指数后求和）
-            if 'ln_quantity' in df.columns:
+            if 'quantity' in df.columns:
                 df['quantity'] = np.exp(df['ln_quantity']).clip(lower=1e-6)
                 q = df.groupby(['分类名称', '销售日期'], as_index=False)['quantity'].sum()
                 qtl = float(self.opt_config.get('demand_cap_quantile', 0.95))
@@ -88,6 +90,35 @@ class VegetableOptimizer:
                     self.category_demand_cap[cat] = float(sub['quantity'].quantile(qtl))
         except Exception as e:
             print(f"Warning: failed to initialize category baselines/caps: {e}")
+
+    def _calculate_average_wastage_rates(self):
+        """从原始数据计算并加载各品类的平均损耗率。"""
+        self.category_wastage_rates = {}
+        try:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            raw_data_path_rel = self.config.get('data_paths', {}).get('raw_item_data')
+            if not raw_data_path_rel:
+                return
+            raw_data_path = os.path.join(project_root, raw_data_path_rel)
+            if not os.path.exists(raw_data_path):
+                return
+            
+            df = pd.read_csv(raw_data_path)
+            
+            # 确保列名正确
+            if '分类名称' in df.columns and '损耗率(%)' in df.columns:
+                # 转换损耗率为浮点数，并处理异常值
+                df['损耗率'] = pd.to_numeric(df['损耗率(%)'], errors='coerce') / 100.0
+                df = df.dropna(subset=['损耗率'])
+                
+                # 按品类计算平均损耗率
+                avg_wastage = df.groupby('分类名称')['损耗率'].mean()
+                self.category_wastage_rates = avg_wastage.to_dict()
+                
+                print(f"Successfully loaded average wastage rates for {len(self.category_wastage_rates)} categories.")
+
+        except Exception as e:
+            print(f"Warning: failed to calculate average wastage rates: {e}")
     
     def load_demand_models(self):
         """加载已训练的随机森林（或其他）模型及其元数据。"""
@@ -243,7 +274,7 @@ class VegetableOptimizer:
         返回每个场景的利润数组。
         """
         if wastage_rate is None:
-            wastage_rate = self.default_wastage_rate
+            wastage_rate = self.category_wastage_rates.get(category, self.default_wastage_rate)
         mean_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
         
         if std_demand <= 0:
@@ -273,7 +304,7 @@ class VegetableOptimizer:
         if n_scenarios is None:
             n_scenarios = int(self.opt_config.get('monte_carlo_samples', 50))
         if wastage_rate is None:
-            wastage_rate = self.default_wastage_rate
+            wastage_rate = self.category_wastage_rates.get(category, self.default_wastage_rate)
         mean_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
         if std_demand <= 0:
             std_demand = mean_demand * 0.1
@@ -308,7 +339,7 @@ class VegetableOptimizer:
         
         # 预测需求并基于安全库存计算订货量
         predicted_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
-        order_quantity = self.calculate_order_quantity(predicted_demand, std_demand)
+        order_quantity = self.calculate_order_quantity(predicted_demand, std_demand, category)
 
         # 使用蒙特卡洛模拟计算期望利润
         metrics = self.simulate_metrics(
@@ -354,12 +385,12 @@ class VegetableOptimizer:
         
         return (a + b) / 2
 
-    def calculate_order_quantity(self, predicted_demand, std_demand, wastage_rate=None):
+    def calculate_order_quantity(self, predicted_demand, std_demand, category, wastage_rate=None):
         """基于服务水平计算订货量，包含安全库存。
-        通过考虑损耗来保证 R*(1-W) \u003e= Q。
+        通过考虑损耗来保证 R*(1-W) >= Q。
         """
         if wastage_rate is None:
-            wastage_rate = self.default_wastage_rate
+            wastage_rate = self.category_wastage_rates.get(category, self.default_wastage_rate)
         service_level = self.opt_config['service_level']
         # 标准正态分布的 Z 分数
         z_score_map = {0.80: 0.84, 0.85: 1.04, 0.90: 1.28, 0.95: 1.65, 0.98: 2.05}
@@ -391,7 +422,7 @@ class VegetableOptimizer:
         optimal_price = wholesale_cost * optimal_markup
 
         predicted_demand, std_demand = self.predict_demand(category, optimal_price, date, wholesale_cost=wholesale_cost)
-        optimal_quantity = self.calculate_order_quantity(predicted_demand, std_demand)
+        optimal_quantity = self.calculate_order_quantity(predicted_demand, std_demand, category)
         
         return optimal_price, optimal_quantity
 
@@ -495,7 +526,7 @@ class VegetableOptimizer:
             predicted_demand, std_demand = self.predict_demand(category, price, date, wholesale_cost=wholesale_cost)
             demands.append(predicted_demand)
             
-            order_quantity = self.calculate_order_quantity(predicted_demand, std_demand)
+            order_quantity = self.calculate_order_quantity(predicted_demand, std_demand, category)
             profit_scenarios = self.calculate_profit_scenarios(
                 category, price, date, order_quantity, wholesale_cost
             )

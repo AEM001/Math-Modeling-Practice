@@ -155,7 +155,7 @@ class OptimizationReportGenerator:
 约束条件：
 - 加成比例范围: 100% - 200%
 - 服务水平要求: ≥80%
-- 损耗率考虑: 5%
+- 损耗率考虑: 根据各品类历史数据动态计算
 
 #### 2.2 优化目标函数
 **Max Profit = Σ(预期收入 - 采购成本 - 缺货惩罚 - 浪费惩罚)**
@@ -288,7 +288,7 @@ class OptimizationReportGenerator:
 
 ### A. 模型参数设置
 - 服务水平目标: {self.config['optimization']['service_level']:.0%}
-- 损耗率假设: {self.config['optimization']['wastage_rate']:.1%}
+- 损耗率假设: 根据各品类历史数据动态计算
 - 加成范围: {self.config['optimization']['min_markup_ratio']:.0%} - {self.config['optimization']['max_markup_ratio']:.0%}
 - 缺货惩罚权重: {self.config['optimization']['stockout_penalty_weight']}
 - 浪费惩罚权重: {self.config['optimization']['wastage_penalty_weight']}

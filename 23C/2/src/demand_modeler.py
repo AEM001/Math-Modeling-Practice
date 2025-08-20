@@ -88,8 +88,10 @@ class DemandModeler:
 
         # 用指定参数训练随机森林
         rf = RandomForestRegressor(
-            n_estimators=50,
-            max_depth=8,
+            n_estimators=30,  # 减少树的数量
+            max_depth=5,  # 限制树的深度
+            min_samples_leaf=5,  # 增加叶节点最小样本数
+            max_features=0.8,  # 限制特征使用比例
             random_state=self.config.get('modeling', {}).get('random_state', 42),
             n_jobs=-1
         )
@@ -120,8 +122,8 @@ class DemandModeler:
             'test_mae': test_mae,
             'price_elasticity': np.nan,
             'ln_resid_std': ln_resid_std,
-            'n_estimators': 50,
-            'max_depth': 8,
+            'n_estimators': 30,
+            'max_depth': 5,
             'model_path': model_path
         }
 
